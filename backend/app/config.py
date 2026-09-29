@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     # "auto" picks the first provider that has a key: gemini -> openai -> anthropic -> offline
     llm_provider: str = "auto"
     gemini_api_key: str = ""
-    gemini_model: str = "gemini-2.5-flash"
+    gemini_model: str = "gemini-3.8-flash"
     openai_api_key: str = ""
     openai_model: str = "gpt-4o-mini"
     openai_base_url: str = "https://api.openai.com/v1"

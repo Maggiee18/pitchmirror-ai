@@ -80,7 +80,8 @@ export default function ReportView({ sessionId, onHome, onPracticeAgain }: { ses
   return (
     <div className="report">
       <header className="topbar report-top no-print">
-        <button className="brand as-button" onClick={onHome}><Logo /><span>PitchMirror</span></button>
+        <button className="brand as-button" onClick={onHome} title="Back to home"><Logo /><span>PitchMirror</span></button>
+        <button className="btn small home-btn" onClick={onHome} aria-label="Go to home page">← Home</button>
         <div className="deck-name">{r.overview.filename}</div>
         <div className="topbar-right">
           <button className="btn" onClick={practiceAgain}>Practice again</button>

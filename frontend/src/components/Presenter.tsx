@@ -32,6 +32,7 @@ export default function Presenter({ sessionId, onHome, onReport }: { sessionId: 
   const [paused, setPaused] = useState(false);
   const [answeringId, setAnsweringId] = useState<string | null>(null);
   const [ending, setEnding] = useState(false);
+  const [confirmLeave, setConfirmLeave] = useState(false);
   const [, forceTick] = useState(0);
   const clock = useRef({ base: 0, at: performance.now(), running: false });
 
@@ -200,6 +201,17 @@ export default function Presenter({ sessionId, onHome, onReport }: { sessionId: 
     socket.send({ type: "end" });
   };
 
+  const leave = () => {
+    setConfirmLeave(false);
+    stopMic();
+    onHome();
+  };
+  // Leaving mid presentation would silently drop the run, so ask first.
+  const requestHome = () => {
+    if (session?.status === "live") setConfirmLeave(true);
+    else leave();
+  };
+
   const changeMode = async (m: Mode) => {
     try {
       await api.setMode(sessionId, m);
@@ -260,10 +272,11 @@ export default function Presenter({ sessionId, onHome, onReport }: { sessionId: 
     <div className="presenter">
       {/* ------------------------------------------------ top bar */}
       <header className="topbar">
-        <button className="brand as-button" onClick={onHome} title="Back to start">
+        <button className="brand as-button" onClick={requestHome} title="Back to home">
           <Logo />
           <span>PitchMirror</span>
         </button>
+        <button className="btn small home-btn" onClick={requestHome} aria-label="Go to home page">← Home</button>
         <div className="deck-name" title={session.filename}>{session.filename}</div>
         <div className="topbar-mid">
           {session.status === "ready" ? (
@@ -453,6 +466,20 @@ export default function Presenter({ sessionId, onHome, onReport }: { sessionId: 
           {session.status === "ended" && <button className="btn" onClick={restart}>Practice again</button>}
         </div>
       </footer>
+
+      {confirmLeave && (
+        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="leave-title" onClick={() => setConfirmLeave(false)}>
+          <div className="card start-card" onClick={(e) => e.stopPropagation()}>
+            <h2 id="leave-title">Leave this presentation?</h2>
+            <p className="muted">You're still presenting. End it first to get your report, or leave now and lose this run's report.</p>
+            <div className="row">
+              <button className="btn primary" onClick={() => { setConfirmLeave(false); end(); }}>End and see report</button>
+              <button className="btn danger" onClick={leave}>Leave without report</button>
+              <button className="btn ghost" onClick={() => setConfirmLeave(false)}>Keep presenting</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="toasts" aria-live="polite">
         {state.notices.map((n) => (

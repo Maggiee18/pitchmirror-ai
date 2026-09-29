@@ -292,3 +292,6 @@ p { margin: 0 0 8px; line-height: 1.5; }
   .no-print { display: none !important; }
   .r-section { break-inside: avoid; }
 }
+
+.home-btn { flex-shrink: 0; }
+.modal-backdrop { position: fixed; inset: 0; background: rgba(8,9,15,.72); backdrop-filter: blur(3px); display: flex; align-items: center; justify-content: center; z-index: 30; padding: 16px; }
