@@ -1,0 +1,12 @@
+.env
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+node_modules/
+.pitchmirror_data/
+e2e_shots/
+*.log
+.DS_Store
+frontend/tsconfig.tsbuildinfo
