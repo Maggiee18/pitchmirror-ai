@@ -1,11 +1,16 @@
 import { useState } from "react";
 import { api } from "../api";
+import type { CameraState, Gaze } from "../hooks/useCameraPresence";
 import type { SlideAnalysis, SlideContext } from "../types";
+
+const GAZE_LABEL: Record<Gaze, string> = { audience: "eye contact", down: "looking down", turned: "looking away", "no-face": "no face" };
 
 const VIS_LABEL: Record<string, string> = { chart: "Chart", table: "Table", diagram: "Diagram", image: "Image" };
 
-export default function SlidePanel({ sessionId, slide, total, analysis }: {
+export default function SlidePanel({ sessionId, slide, total, analysis, videoRef, camera }: {
   sessionId: string; slide: SlideContext; total: number; analysis?: SlideAnalysis;
+  videoRef: React.RefObject<HTMLVideoElement>;
+  camera: { state: CameraState; gaze: Gaze; error: string; debug?: string } | null;
 }) {
   const [failed, setFailed] = useState<Record<number, boolean>>({});
   const covered = new Set((analysis?.covered_concepts ?? []).map((c) => c.toLowerCase()));
@@ -19,6 +24,18 @@ export default function SlidePanel({ sessionId, slide, total, analysis }: {
         {slide.enriched && <span className="tag" title="A vision model has described this slide">vision</span>}
       </div>
       <div className="slide-frame">
+        <div className={`selfview ${camera ? "" : "hidden"} gaze-${camera?.gaze ?? "no-face"}`} aria-hidden={!camera}>
+          <video ref={videoRef} playsInline muted />
+          {camera && (
+            <span className="selfview-label">
+              {camera.state === "starting" ? "starting camera…"
+                : camera.state === "calibrating" ? "look at the camera…"
+                : camera.state === "denied" || camera.state === "error" ? camera.error
+                : GAZE_LABEL[camera.gaze]}
+              {camera.debug && <><br />{camera.debug}</>}
+            </span>
+          )}
+        </div>
         {failed[slide.slide_number] ? (
           <div className="slide-fallback">
             <h3>{slide.title || `Slide ${slide.slide_number}`}</h3>

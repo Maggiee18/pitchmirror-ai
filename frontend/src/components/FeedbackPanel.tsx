@@ -24,8 +24,10 @@ export default function FeedbackPanel(props: {
   onAnswer: (id: string) => void;
   onDone: (id: string, typed: string) => void;
   onSkip: (id: string) => void;
+  onSpeak?: (text: string) => void;
+  examinerSpeaking?: boolean;
 }) {
-  const { feedback, questions, currentSlide, questionPending, evaluating, answeringId, live, onAnswer, onDone, onSkip } = props;
+  const { feedback, questions, currentSlide, questionPending, evaluating, answeringId, live, onAnswer, onDone, onSkip, onSpeak, examinerSpeaking } = props;
   const [filter, setFilter] = useState<"all" | "slide">("all");
 
   const open = questions.filter((q) => q.status === "open");
@@ -51,7 +53,7 @@ export default function FeedbackPanel(props: {
           <div className="card-q pending"><span className="spinner" /> Your audience is thinking of a question…</div>
         )}
         {open.map((q) => (
-          <QuestionCard key={q.id} q={q} answering={answeringId === q.id} live={live}
+          <QuestionCard key={q.id} q={q} answering={answeringId === q.id} live={live} onSpeak={onSpeak} speaking={!!examinerSpeaking}
             evaluating={evaluating.includes(q.id)} onAnswer={onAnswer} onDone={onDone} onSkip={onSkip} />
         ))}
         {recentAnswered.map((q) => (
@@ -101,8 +103,8 @@ function FeedbackCard({ f }: { f: FeedbackItem }) {
   );
 }
 
-function QuestionCard({ q, answering, live, evaluating, onAnswer, onDone, onSkip }: {
-  q: Question; answering: boolean; live: boolean; evaluating: boolean;
+function QuestionCard({ q, answering, live, evaluating, onAnswer, onDone, onSkip, onSpeak, speaking }: {
+  q: Question; answering: boolean; live: boolean; evaluating: boolean; onSpeak?: (text: string) => void; speaking: boolean;
   onAnswer: (id: string) => void; onDone: (id: string, typed: string) => void; onSkip: (id: string) => void;
 }) {
   const [typed, setTyped] = useState("");
@@ -110,10 +112,11 @@ function QuestionCard({ q, answering, live, evaluating, onAnswer, onDone, onSkip
     <article className={`card-q ${answering ? "answering" : ""}`}>
       <div className="fb-head">
         <span className="fb-kind q">{q.depth > 0 ? `Follow-up ${q.depth}` : "Question"}</span>
-        <span className="fb-cat">{q.difficulty}</span>
+        <span className="fb-cat">{q.difficulty}{q.source === "rule" ? " · rule based" : ""}</span>
         <span className="fb-slide">Slide {q.slide_number}</span>
       </div>
       <p className="q-text">{q.question}</p>
+      {speaking && <div className="muted small"><span className="dot pulse" /> Examiner is speaking… your mic resumes when it finishes.</div>}
       {q.reason && <p className="q-reason">Why: {q.reason}</p>}
       {live && !evaluating && (
         answering ? (
@@ -128,6 +131,7 @@ function QuestionCard({ q, answering, live, evaluating, onAnswer, onDone, onSkip
         ) : (
           <div className="row">
             <button className="btn primary small" onClick={() => onAnswer(q.id)}>Answer</button>
+            {onSpeak && <button className="btn small ghost" onClick={() => onSpeak(q.question)}>Read aloud</button>}
             <button className="btn small ghost" onClick={() => onSkip(q.id)}>Skip</button>
           </div>
         )

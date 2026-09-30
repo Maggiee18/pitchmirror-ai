@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { api, fmtTime } from "../api";
+import { useCameraPresence } from "../hooks/useCameraPresence";
+import { useSpeaker } from "../hooks/useSpeaker";
 import { browserSpeechSupported, useBrowserSpeech } from "../hooks/useBrowserSpeech";
 import { useSessionSocket } from "../hooks/useSessionSocket";
 import { useVoiceActivity } from "../hooks/useVoiceActivity";
@@ -33,6 +35,9 @@ export default function Presenter({ sessionId, onHome, onReport }: { sessionId: 
   const [answeringId, setAnsweringId] = useState<string | null>(null);
   const [ending, setEnding] = useState(false);
   const [confirmLeave, setConfirmLeave] = useState(false);
+  const [cameraWanted, setCameraWanted] = useState<boolean>(() => !!navigator.mediaDevices?.getUserMedia);
+  const [voiceOn, setVoiceOn] = useState(true);
+  const videoRef = useRef<HTMLVideoElement>(null);
   const [, forceTick] = useState(0);
   const clock = useRef({ base: 0, at: performance.now(), running: false });
 
@@ -107,7 +112,9 @@ export default function Presenter({ sessionId, onHome, onReport }: { sessionId: 
   }, []);
 
   const live = session?.status === "live";
-  const listening = live && mic === "on" && !paused && engine !== "typed";
+  const speaker = useSpeaker(lang);
+  // the mic is paused while the examiner speaks so the question isn't transcribed as your speech
+  const listening = live && mic === "on" && !paused && engine !== "typed" && !speaker.speaking;
 
   // ---------------------------------------------------------------- transcript sinks
   const currentSlide = session?.current_slide ?? 1;
@@ -154,6 +161,28 @@ export default function Presenter({ sessionId, onHome, onReport }: { sessionId: 
     },
   });
 
+  const camera = useCameraPresence({
+    enabled: live && cameraWanted,
+    videoRef,
+    onSample: (s) => socket.send({ type: "presence", slide_number: slideRef.current, ...s }),
+    onLookAway: (d) => socket.send({ type: "look_away", slide_number: slideRef.current, duration_s: d, answering: !!answeringRef.current }),
+  });
+
+  // speak new questions aloud (not ones that already existed when the page loaded)
+  const knownQuestions = useRef<Set<string> | null>(null);
+  useEffect(() => {
+    if (!session) return;
+    if (knownQuestions.current === null) {
+      knownQuestions.current = new Set(session.questions.map((q) => q.id));
+      return;
+    }
+    for (const q of session.questions) {
+      if (knownQuestions.current.has(q.id)) continue;
+      knownQuestions.current.add(q.id);
+      if (voiceOn && live && q.status === "open") speaker.speak(q.question);
+    }
+  }, [session, voiceOn, live, speaker]);
+
   const whisper = useWhisperRecorder({
     stream,
     active: listening && engine === "whisper",
@@ -195,6 +224,7 @@ export default function Presenter({ sessionId, onHome, onReport }: { sessionId: 
   }, [goSlide, currentSlide]);
 
   const end = () => {
+    speaker.stop();
     setEnding(true);
     setAnsweringId(null);
     stopMic();
@@ -316,7 +346,14 @@ export default function Presenter({ sessionId, onHome, onReport }: { sessionId: 
 
       {/* ------------------------------------------------ main */}
       <main className="stage">
-        <SlidePanel sessionId={sessionId} slide={slide} total={session.slides.length} analysis={session.analysis[String(slide.slide_number)]} />
+        <SlidePanel
+          sessionId={sessionId}
+          slide={slide}
+          total={session.slides.length}
+          analysis={session.analysis[String(slide.slide_number)]}
+          videoRef={videoRef}
+          camera={live && cameraWanted ? camera : null}
+        />
         <TranscriptPanel
           segments={session.segments}
           interim={listening && engine === "browser" ? interim : ""}
@@ -345,6 +382,8 @@ export default function Presenter({ sessionId, onHome, onReport }: { sessionId: 
             socket.send({ type: "answer_done", question_id: id, typed_answer: typed });
             setAnsweringId(null);
           }}
+          onSpeak={speaker.supported ? (text) => speaker.speak(text) : undefined}
+          examinerSpeaking={speaker.speaking}
           onSkip={(id) => {
             socket.send({ type: "skip_question", question_id: id });
             if (answeringId === id) setAnsweringId(null);
@@ -379,6 +418,18 @@ export default function Presenter({ sessionId, onHome, onReport }: { sessionId: 
                     <select value={lang} onChange={(e) => setLang(e.target.value)}>
                       {LANGS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                     </select>
+                  </label>
+                )}
+              </div>
+              <div className="toggle-row">
+                <label className="check-label">
+                  <input type="checkbox" checked={cameraWanted} onChange={(e) => setCameraWanted(e.target.checked)} />
+                  Camera for eye contact (video stays on this device)
+                </label>
+                {speaker.supported && (
+                  <label className="check-label">
+                    <input type="checkbox" checked={voiceOn} onChange={(e) => setVoiceOn(e.target.checked)} />
+                    Examiner reads questions aloud
                   </label>
                 )}
               </div>
@@ -434,7 +485,19 @@ export default function Presenter({ sessionId, onHome, onReport }: { sessionId: 
             >
               <MicIcon />
               <span className="mic-meter" style={{ transform: `scaleY(${listening ? 0.15 + vad.level * 0.85 : 0.1})` }} />
-              {listening ? "Listening" : mic === "on" ? "Paused" : mic === "denied" ? "Mic blocked" : "Enable mic"}
+              {listening ? "Listening" : speaker.speaking ? "Examiner speaking" : mic === "on" ? "Paused" : mic === "denied" ? "Mic blocked" : "Enable mic"}
+            </button>
+          )}
+          {live && (
+            <button className={`btn small ${cameraWanted ? "toggle-on" : ""}`} onClick={() => setCameraWanted((c) => !c)} aria-pressed={cameraWanted}
+              title="Webcam eye contact, analysed on this device">
+              {cameraWanted ? "Camera on" : "Camera off"}
+            </button>
+          )}
+          {live && speaker.supported && (
+            <button className={`btn small ${voiceOn ? "toggle-on" : ""}`} onClick={() => { if (voiceOn) speaker.stop(); setVoiceOn((v) => !v); }} aria-pressed={voiceOn}
+              title="Examiner reads questions aloud">
+              {voiceOn ? "Voice on" : "Voice off"}
             </button>
           )}
           {live && engine === "typed" && <span className="muted small">Typing mode: enter your explanation in the transcript box.</span>}

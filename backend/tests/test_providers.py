@@ -82,3 +82,23 @@ def test_provider_selection():
     assert build_provider(Settings(llm_provider="auto", gemini_api_key="", openai_api_key="", anthropic_api_key="")).name == "offline"
     assert build_provider(Settings(llm_provider="auto", gemini_api_key="", openai_api_key="x", anthropic_api_key="")).name == "openai"
     assert build_provider(Settings(llm_provider="anthropic", gemini_api_key="g", openai_api_key="", anthropic_api_key="")).name == "offline"
+
+
+def test_gemini3_thinking_level_and_fallback():
+    seen = []
+
+    def handler(req):
+        body = json.loads(req.content)
+        cfg = body["generationConfig"]
+        seen.append(cfg.get("thinkingConfig"))
+        assert cfg["maxOutputTokens"] >= 4096
+        if cfg.get("thinkingConfig", {}).get("thinkingLevel") == "minimal":
+            return httpx.Response(400, json={"error": {"message": "thinking level minimal is not supported for this model"}})
+        return httpx.Response(200, json={"candidates": [{"finishReason": "STOP", "content": {"parts": [
+            {"text": "internal reasoning", "thought": True}, {"text": '{"ok": 3}'}]}}]})
+    p = make("gemini", handler)
+    p.model = "gemini-3.5-flash"
+    assert asyncio.run(p.generate_json("s", "p", max_tokens=300)) == {"ok": 3}
+    assert seen == [{"thinkingLevel": "minimal"}, {"thinkingLevel": "low"}]
+    asyncio.run(p.generate_json("s", "p"))
+    assert seen[-1] == {"thinkingLevel": "low"}  # remembers the working level

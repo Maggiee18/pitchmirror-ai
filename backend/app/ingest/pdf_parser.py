@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pymupdf
 
-from ..analysis.text_utils import content_words, key_phrases, normalize, numbers_in
+from ..analysis.text_utils import content_words, is_contact_line, key_phrases, normalize, numbers_in
 from ..models import SlideContext, VisualElement
 
 log = logging.getLogger("pitchmirror.ingest.pdf")
@@ -165,28 +165,36 @@ def parse_page(page: pymupdf.Page, slide_number: int, out_dir: Path, render_widt
         return False
 
     diagram_labels: list[str] = []
-    blocks: dict[int, list[str]] = {}
+    # Paragraphs: lines of one text block, but a change in font size starts a new paragraph
+    # (section headings in resumes and reports often share a block with the text around them).
+    paragraphs: list[list[str]] = []
+    prev_block, prev_size = None, None
     for l in lines:
-        r, t, _, b_idx = l
+        r, t, size, b_idx = l
         if id(l) in title_ids:
             continue
         if inside_visual(r, t):
             if any(v.kind == "diagram" and vr.intersects(r) for vr, v in visual_regions) and not NUMERIC_ONLY.match(t):
                 diagram_labels.append(t)
             continue
-        blocks.setdefault(b_idx, []).append(t)
-    body = [clean_bullet(" ".join(ts)) for ts in blocks.values()]
+        if b_idx != prev_block or prev_size is None or abs(size - prev_size) > 0.5:
+            paragraphs.append([])
+        paragraphs[-1].append(t)
+        prev_block, prev_size = b_idx, size
+    body = [clean_bullet(" ".join(ts)) for ts in paragraphs]
     body = [b for b in body if b]
 
     all_text = [title, *body]
     word_count = sum(len(t.split()) for t in all_text)
     numbers = []
     for t in all_text:
+        if is_contact_line(t):
+            continue
         for n in numbers_in(t):
             if n not in numbers:
                 numbers.append(n)
 
-    important = [l for l in body if numbers_in(l)][:5]
+    important = [l for l in body if numbers_in(l) and not is_contact_line(l)][:5]
     important += [f"{v.kind}: {v.description}" for v in visuals]
 
     return SlideContext(

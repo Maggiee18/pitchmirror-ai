@@ -19,6 +19,7 @@ from typing import Any, Optional
 
 from fastapi import WebSocket
 
+from ..analysis.presence import PresenceTracker
 from ..config import get_settings
 from ..models import (
     FeedbackItem,
@@ -71,6 +72,7 @@ class Session:
     analysis_running: set[int] = field(default_factory=set)
     analysis_pending: dict[int, bool] = field(default_factory=dict)
     question_pending: bool = False
+    presence: PresenceTracker = field(default_factory=PresenceTracker)
 
     # ------------------------------------------------------------------ helpers
     def slide(self, n: int) -> Optional[SlideContext]:
@@ -137,6 +139,7 @@ class Session:
         self.rejected_items = 0
         self.last_auto_question_at = 0.0
         self.last_nudge_at = {}
+        self.presence = PresenceTracker()
         self.analysis_running, self.analysis_pending = set(), {}
 
     def public(self, provider: dict, metrics: dict) -> SessionPublic:

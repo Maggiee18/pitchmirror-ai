@@ -51,6 +51,10 @@ export default function TranscriptPanel(props: {
         <Metric label="Words" value={String(metrics.total_words)} />
         <Metric label="Fillers" value={String(metrics.filler_total)} warn={metrics.total_words > 30 && metrics.filler_total / metrics.total_words > 0.04} />
         <Metric label="Pauses" value={String(metrics.pause_count)} sub={metrics.long_pause_count ? `${metrics.long_pause_count} long` : undefined} />
+        {metrics.presence?.camera && (
+          <Metric label="Eye contact" value={metrics.presence.eye_contact_pct !== null ? `${Math.round(metrics.presence.eye_contact_pct)}` : "–"} unit="%"
+            warn={metrics.presence.eye_contact_pct !== null && metrics.presence.eye_contact_pct < 40} />
+        )}
       </div>
 
       <div

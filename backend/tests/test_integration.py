@@ -193,3 +193,43 @@ def test_image_only_and_empty_slides(client, tmp_path):
         read_until(ws, lambda m: m["type"] == "report_ready")
     rep = client.get(f"/api/sessions/{sid}/report").json()["report"]
     assert rep["scores"][0]["value"] is None and "Unable to determine" in rep["scores"][0]["derivation"][0]
+
+
+def test_camera_presence_fusion(client):
+    """Low eye contact + transcript matching the slide text => 'read off the screen' feedback, and a presence report."""
+    llm_mod.set_llm(LLMProvider("offline", "", supports_vision=False))
+    sid = client.post("/api/samples/crowdsense_viva_demo.pdf", data={"mode": "presentation"}).json()["id"]
+    with client.websocket_connect(f"/ws/{sid}") as ws:
+        ws.receive_json()
+        ws.send_json({"type": "start"})
+        ws.send_json({"type": "slide", "slide_number": 2})
+        # 12 seconds of camera samples: face visible, mostly looking down
+        for _ in range(6):
+            ws.send_json({"type": "presence", "slide_number": 2, "frames": 20, "face_frames": 20, "engaged_frames": 4,
+                          "down_frames": 15, "turned_frames": 1, "seconds": 2})
+        ws.send_json({"type": "presence", "slide_number": 2, "frames": 5, "face_frames": 9, "engaged_frames": 0,
+                      "down_frames": 0, "turned_frames": 0, "seconds": 2})  # invalid: ignored
+        ws.send_json({"type": "look_away", "slide_number": 2, "duration_s": 9})
+        read_aloud = ("Crowd crushes caused more than 1,400 deaths worldwide between 2010 and 2023. "
+                      "Manual CCTV monitoring: one operator watches around 40 camera feeds. "
+                      "Existing systems count people but do not predict dangerous density build up.")
+        ws.send_json({"type": "transcript", "seq": 1, "text": read_aloud, "slide_number": 2, "t_start": 1, "t_end": 12})
+        ws.send_json({"type": "slide", "slide_number": 3})
+        fb, _ = read_until(ws, lambda m: m["type"] == "feedback" and "off the screen" in m["item"]["observation"])
+        assert "eye contact was 20%" in fb["item"]["observation"]
+        ws.send_json({"type": "end"})
+        read_until(ws, lambda m: m["type"] == "report_ready")
+    rep = client.get(f"/api/sessions/{sid}/report").json()["report"]
+    pr = rep["presence"]
+    assert pr["used"] and pr["raw"]["eye_contact_pct"] == 20.0 and pr["raw"]["long_look_aways"] == 1
+    assert any(s["name"] == "Presence (camera)" for s in rep["scores"])
+
+
+def test_rate_limit(client, monkeypatch):
+    from app import main as main_mod
+    llm_mod.set_llm(LLMProvider("offline", "", supports_vision=False))
+    monkeypatch.setattr(main_mod.settings, "uploads_per_hour_per_ip", 2)
+    main_mod.limiter.hits.clear()
+    codes = [client.post("/api/samples/crowdsense_viva_demo.pdf", data={"mode": "viva"}).status_code for _ in range(3)]
+    assert codes == [200, 200, 429]
+    main_mod.limiter.hits.clear()

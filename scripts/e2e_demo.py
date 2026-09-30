@@ -41,7 +41,7 @@ MOCK_SPEECH = """
 
 
 def say(page, text):
-    for _ in range(20):
+    for _ in range(100):  # the mic pauses while the examiner reads a question aloud
         if page.evaluate("t => window.__say(t)", text):
             return
         time.sleep(0.2)

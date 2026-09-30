@@ -51,6 +51,11 @@ class Settings(BaseSettings):
     auto_question_min_interval_s: float = 40.0
     enrich_slides_with_vision: bool = True
 
+    # --- Public deployment protection ----------------------------------------
+    max_sessions: int = 200
+    uploads_per_hour_per_ip: int = 30
+    transcribe_per_minute_per_ip: int = 40
+
     # --- Server ---------------------------------------------------------------
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
     log_level: str = "INFO"

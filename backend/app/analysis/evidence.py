@@ -8,7 +8,9 @@ from __future__ import annotations
 from ..models import FeedbackItem, SlideContext
 from .text_utils import (
     content_words,
+    is_contact_line,
     is_covered,
+    is_year_value,
     ngrams,
     number_value,
     numbers_in,
@@ -42,6 +44,26 @@ def _is_year(tok: str) -> bool:
     return v is not None and "%" not in tok and 1900 <= v <= 2100 and float(v).is_integer()
 
 
+def _table_rows(slide: SlideContext) -> list[str]:
+    """Turn extracted table data ('h1 | h2; r1 | r2') into header-labelled rows so numbers keep their meaning."""
+    rows_out = []
+    for v in slide.visual_elements:
+        if v.kind != "table" or "|" not in v.data_summary:
+            continue
+        rows = [[c.strip() for c in r.split("|")] for r in v.data_summary.split(";") if r.strip()]
+        if len(rows) < 2:
+            continue
+        header = rows[0]
+        for r in rows[1:]:
+            cells = [f"{h} {c}".strip() for h, c in zip(header[1:], r[1:])]
+            rows_out.append(f"{r[0]}: " + ", ".join(cells))
+    return rows_out
+
+
+def _is_number_token(t: str) -> bool:
+    return any(ch.isdigit() for ch in t) and number_value(t) is not None
+
+
 def number_evidence(slide: SlideContext, speech: str) -> dict:
     said_vals = spoken_numbers(speech)
     speech_toks = tokens(speech)
@@ -50,42 +72,54 @@ def number_evidence(slide: SlideContext, speech: str) -> dict:
         return any(abs(s - v) <= max(0.01 * abs(v), 1e-6) for s in said_vals)
 
     slide_nums = []
-    for line in [slide.title, *slide.text]:
+    for line in [slide.title, *slide.text, *_table_rows(slide)]:
+        if is_contact_line(line):
+            continue
+        line_words = words(line)
         for tok in numbers_in(line):
             v = number_value(tok)
-            if v is None:
+            if v is None or _is_year(tok):
                 continue
-            slide_nums.append({"token": tok, "value": v, "line": line, "percent": "%" in tok, "mentioned": mentioned(v)})
+            slide_nums.append({"token": tok, "value": v, "line": line, "percent": "%" in tok, "mentioned": mentioned(v),
+                               "stems": stems(line), "bigrams": set(ngrams(line_words, 2))})
 
-    # speech numbers with a context window, so they can be compared with the slide line they seem to talk about
-    speech_nums = []
-    for i, t in enumerate(speech_toks):
-        v = number_value(t) if any(ch.isdigit() for ch in t) else None
-        if v is None:
-            continue
-        ctx = speech_toks[max(0, i - 8) : i + 9]
+    # Each spoken number gets the words around it, bounded by the neighbouring numbers, so a sentence that lists
+    # several figures does not mix up their contexts.
+    num_idx = [i for i, t in enumerate(speech_toks) if _is_number_token(t)]
+    conflicts, seen = [], set()
+    for k, i in enumerate(num_idx):
+        t = speech_toks[i]
+        v = number_value(t)
+        if is_year_value(v, t) or abs(v) >= 1e6 and "," not in t:
+            continue  # years ("since 2023") and phone-like numbers are not claims
+        lo = max(num_idx[k - 1] + 1 if k else 0, i - 8)
+        hi = min(num_idx[k + 1] if k + 1 < len(num_idx) else len(speech_toks), i + 9)
+        ctx_toks = speech_toks[lo:hi]
         pct = (i + 1 < len(speech_toks) and speech_toks[i + 1] in ("percent", "%", "per")) or t.endswith("%")
-        speech_nums.append({"value": v, "percent": pct, "context": " ".join(ctx)})
-
-    conflicts = []
-    for sn in slide_nums:
-        if sn["mentioned"] or _is_year(sn["token"]):
-            continue
-        line_stems = stems(sn["line"])
-        for sp in speech_nums:
-            if sp["percent"] != sn["percent"]:
+        ctx_stems = stems(" ".join(ctx_toks))
+        ctx_bigrams = set(ngrams([w.strip(".,'") for w in ctx_toks], 2))
+        scored = []
+        for sn in slide_nums:
+            if sn["percent"] != pct:
                 continue
-            if abs(sp["value"] - sn["value"]) <= 0.05 * max(abs(sn["value"]), 1):
-                continue
-            ctx_stems = stems(sp["context"])
-            overlap = line_stems & ctx_stems
+            overlap = sn["stems"] & ctx_stems
             if len(overlap) >= 2:
-                conflicts.append({
-                    "slide_line": sn["line"], "slide_value": sn["token"],
-                    "speech_excerpt": sp["context"], "speech_value": sp["value"],
-                    "shared_terms": sorted(overlap)[:6],
-                })
-                break
+                scored.append(((len(overlap), len(sn["bigrams"] & ctx_bigrams)), sn, overlap))
+        if not scored:
+            continue
+        scored.sort(key=lambda x: x[0], reverse=True)
+        best_score, best, overlap = scored[0]
+        ties = [x for x in scored if x[0] == best_score and abs(x[1]["value"] - best["value"]) > 1e-9]
+        if len(ties) > 1:
+            continue  # ambiguous which slide figure is meant
+        if abs(v - best["value"]) <= 0.05 * max(abs(best["value"]), 1) or best["mentioned"] or best["token"] in seen:
+            continue
+        seen.add(best["token"])
+        conflicts.append({
+            "slide_line": best["line"], "slide_value": best["token"],
+            "speech_excerpt": " ".join(ctx_toks), "speech_value": v,
+            "shared_terms": sorted(overlap)[:6],
+        })
     return {
         "slide_numbers": [{k: n[k] for k in ("token", "line", "mentioned")} for n in slide_nums][:15],
         "possible_number_conflicts": conflicts[:4],
@@ -179,7 +213,7 @@ def rule_feedback(slide: SlideContext, ev: dict, final: bool) -> list[FeedbackIt
         ))
 
     rel = ev["relevance"]
-    if rel is not None and rel < 0.1 and wc >= 40:
+    if rel is not None and rel < 0.1 and wc >= 30:
         items.append(FeedbackItem(
             slide_number=n, kind="warning", category="off_topic", severity="medium",
             observation="What you are saying has little overlap with this slide's content.",

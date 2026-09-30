@@ -6,6 +6,7 @@ import json
 import logging
 import re
 import shutil
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -65,6 +66,39 @@ app.add_middleware(
 )
 
 
+class RateLimiter:
+    """Tiny in-memory sliding window limiter, so a public demo link can't burn through the API keys."""
+
+    def __init__(self) -> None:
+        self.hits: dict[str, list[float]] = {}
+
+    def check(self, key: str, limit: int, window_s: float) -> None:
+        now = time.time()
+        recent = [t for t in self.hits.get(key, []) if now - t < window_s]
+        if len(recent) >= limit:
+            raise HTTPException(429, "Too many requests. Please wait a little and try again.")
+        recent.append(now)
+        self.hits[key] = recent
+        if len(self.hits) > 5000:  # bound memory
+            self.hits = {k: v for k, v in self.hits.items() if v and now - v[-1] < window_s}
+
+
+limiter = RateLimiter()
+
+
+def client_ip(request: Request) -> str:
+    fwd = request.headers.get("x-forwarded-for", "")
+    return (fwd.split(",")[0].strip() if fwd else "") or (request.client.host if request.client else "unknown")
+
+
+def _guard_new_session(request: Request) -> None:
+    limiter.check("up:" + client_ip(request), settings.uploads_per_hour_per_ip, 3600)
+    if len(store) >= settings.max_sessions:
+        store.cleanup_expired()
+        if len(store) >= settings.max_sessions:
+            raise HTTPException(503, "The server is busy. Please try again in a few minutes.")
+
+
 def _session_or_404(sid: str) -> Session:
     if not SID_RE.match(sid or ""):
         raise HTTPException(404, "Session not found")
@@ -116,8 +150,9 @@ async def health():
 
 
 @app.post("/api/upload")
-async def upload(file: UploadFile = File(...), mode: str = Form("presentation")):
+async def upload(request: Request, file: UploadFile = File(...), mode: str = Form("presentation")):
     mode = _mode_or_400(mode)
+    _guard_new_session(request)
     head = await file.read(2048)
     kind = detect_kind(file.filename or "", head) if head else None
     if not kind:
@@ -157,8 +192,9 @@ async def list_samples():
 
 
 @app.post("/api/samples/{name}")
-async def start_sample(name: str, mode: str = Form("viva")):
+async def start_sample(request: Request, name: str, mode: str = Form("viva")):
     mode = _mode_or_400(mode)
+    _guard_new_session(request)
     path = SAMPLES_DIR / Path(name).name
     if path.suffix not in (".pdf", ".pptx") or not path.is_file():
         raise HTTPException(404, "Sample not found")
@@ -234,6 +270,7 @@ async def transcribe(request: Request):
     stt = get_stt()
     if stt is None:
         raise HTTPException(503, "Server transcription is not configured (set GROQ_API_KEY or OPENAI_API_KEY).")
+    limiter.check("stt:" + client_ip(request), settings.transcribe_per_minute_per_ip, 60)
     ctype = request.headers.get("content-type", "audio/webm").split(";")[0]
     if not ctype.startswith("audio/"):
         raise HTTPException(415, "Expected an audio upload.")
@@ -289,7 +326,7 @@ async def ws_session(websocket: WebSocket, sid: str):
 if FRONTEND_DIST.exists():
     app.mount("/assets", StaticFiles(directory=FRONTEND_DIST / "assets"), name="assets")
 
-    @app.get("/{path:path}")
+    @app.api_route("/{path:path}", methods=["GET", "HEAD"])
     async def spa(path: str):
         if path.startswith(("api/", "ws/")):
             raise HTTPException(404)

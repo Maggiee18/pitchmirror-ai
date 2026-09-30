@@ -46,6 +46,19 @@ def _score_delivery(raw: dict) -> dict:
     return {"name": "Delivery", "value": round(max(0, score)), "derivation": lines}
 
 
+def _score_presence(presence: dict) -> dict | None:
+    if not presence.get("used"):
+        return None
+    ec = presence["raw"]["eye_contact_pct"]
+    if ec is None:
+        return {"name": "Presence (camera)", "value": None, "derivation": ["Face not visible often enough. " + UNDETERMINED]}
+    pen = min(20, presence["raw"]["long_look_aways"] * 5)
+    return {"name": "Presence (camera)", "value": round(max(0, ec - pen)),
+            "derivation": [f"Eye contact {ec}% of face-visible time.",
+                           f"{presence['raw']['long_look_aways']} look-aways ≥ 6s × 5: −{pen} (capped at 20).",
+                           "Estimated in-browser from head pose and eye direction; not validated."]}
+
+
 def _presented(session) -> list[int]:
     return [s.slide_number for s in session.slides if session.words_on_slide(s.slide_number) >= 12]
 
@@ -174,10 +187,14 @@ async def build_report(session) -> dict:
     questions = [q.model_dump() for q in session.questions]
     weak_q = [q for q in questions if q["evaluation"] and q["evaluation"]["score"] is not None and q["evaluation"]["score"] <= 2]
 
+    presence = session.presence.report()
     scores = [
         _score_delivery(raw), _score_coverage(session, presented), _score_consistency(session, presented),
         _score_visuals(visual_rows), _score_questions(session),
     ]
+    ps = _score_presence(presence)
+    if ps:
+        scores.append(ps)
 
     asked = [q.question for q in session.questions]
     practice = []
@@ -187,7 +204,7 @@ async def build_report(session) -> dict:
             practice.append({"question": q.question, "slide_number": n, "why": q.reason})
         if len(practice) >= 5:
             break
-    narrative = {"summary": "", "top_recommendations": _rule_recommendations(session, interpretation, visual_rows),
+    narrative = {"summary": "", "top_recommendations": _rule_recommendations(session, interpretation + presence.get("interpretation", []), visual_rows),
                  "practice_questions": practice, "source": "rule"}
 
     llm = get_llm()
@@ -196,6 +213,7 @@ async def build_report(session) -> dict:
             "duration_s": raw["elapsed_s"], "slides_total": len(session.slides), "slides_presented": presented,
             "delivery_raw": {k: raw[k] for k in ("wpm", "total_words", "filler_total", "fillers", "pause_count", "long_pause_count", "repetition", "rushed_segments")},
             "delivery_interpretation": [i["text"] for i in interpretation],
+            "camera_presence": presence.get("raw", {}).get("per_slide") if presence.get("used") else "camera not used",
             "per_slide": [{k: p[k] for k in ("slide_number", "title", "covered", "missed", "reading_ratio")} for p in per_slide if p["presented"]],
             "feedback": [{k: f[k] for k in ("slide_number", "kind", "category", "severity", "observation", "evidence_slide", "evidence_speech")} for f in fb][:30],
             "visuals": visual_rows[:15],
@@ -235,6 +253,7 @@ async def build_report(session) -> dict:
             "slides_not_presented": [p["slide_number"] for p in per_slide if not p["presented"]],
         },
         "delivery": {"raw": raw, "caveats": delivery["caveats"], "interpretation": interpretation},
+        "presence": presence,
         "consistency": {"per_slide": per_slide, "mismatches": mismatches, "other_issues": unsupported,
                         "rejected_ungrounded_items": session.rejected_items},
         "visuals": {"items": visual_rows,

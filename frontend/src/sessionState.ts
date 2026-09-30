@@ -97,7 +97,7 @@ export function reducer(state: LiveState, action: Action): LiveState {
       return { ...state, session: { ...s, enrichment: e.enrichment } };
     case "slide_analysis":
       return {
-        ...state,
+        ...(e.error ? withNotice(state, "warn", `AI analysis unavailable (${e.error}); using the rule engine.`) : state),
         session: { ...s, analysis: { ...s.analysis, [String(e.state.slide_number)]: e.state as SlideAnalysis } },
       };
     case "status":

@@ -1,0 +1,289 @@
+{
+  "analysis": [
+    {
+      "engine": "rule engine (no API key), tuning set",
+      "cases": 13,
+      "exact_match": 13,
+      "precision": 1.0,
+      "recall": 1.0,
+      "per_category": {
+        "slide_speech_consistency": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "tp": 3,
+          "fp": 0,
+          "fn": 0
+        },
+        "reading_slide": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "tp": 1,
+          "fp": 0,
+          "fn": 0
+        },
+        "off_topic": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "tp": 1,
+          "fp": 0,
+          "fn": 0
+        },
+        "visual_gap": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "tp": 2,
+          "fp": 0,
+          "fn": 0
+        }
+      },
+      "latency_ms": {
+        "median": 0.5,
+        "max": 0.7
+      },
+      "rows": [
+        {
+          "case": "wrong percentage",
+          "slide": 4,
+          "expected": [
+            "slide_speech_consistency"
+          ],
+          "flagged": [
+            "slide_speech_consistency"
+          ],
+          "ok": true
+        },
+        {
+          "case": "correct percentage",
+          "slide": 4,
+          "expected": [],
+          "flagged": [],
+          "ok": true
+        },
+        {
+          "case": "spoken number words",
+          "slide": 4,
+          "expected": [],
+          "flagged": [],
+          "ok": true
+        },
+        {
+          "case": "wrong table number",
+          "slide": 5,
+          "expected": [
+            "slide_speech_consistency"
+          ],
+          "flagged": [
+            "slide_speech_consistency"
+          ],
+          "ok": true
+        },
+        {
+          "case": "wrong fps",
+          "slide": 3,
+          "expected": [
+            "slide_speech_consistency"
+          ],
+          "flagged": [
+            "slide_speech_consistency"
+          ],
+          "ok": true
+        },
+        {
+          "case": "read verbatim",
+          "slide": 2,
+          "expected": [
+            "reading_slide"
+          ],
+          "flagged": [
+            "reading_slide"
+          ],
+          "ok": true
+        },
+        {
+          "case": "explained in own words",
+          "slide": 2,
+          "expected": [],
+          "flagged": [],
+          "ok": true
+        },
+        {
+          "case": "off topic",
+          "slide": 6,
+          "expected": [
+            "off_topic"
+          ],
+          "flagged": [
+            "off_topic"
+          ],
+          "ok": true
+        },
+        {
+          "case": "limitations covered",
+          "slide": 6,
+          "expected": [],
+          "flagged": [],
+          "ok": true
+        },
+        {
+          "case": "diagram ignored",
+          "slide": 3,
+          "expected": [
+            "visual_gap"
+          ],
+          "flagged": [
+            "visual_gap"
+          ],
+          "ok": true
+        },
+        {
+          "case": "diagram explained",
+          "slide": 3,
+          "expected": [],
+          "flagged": [],
+          "ok": true
+        },
+        {
+          "case": "table ignored",
+          "slide": 5,
+          "expected": [
+            "visual_gap"
+          ],
+          "flagged": [
+            "visual_gap"
+          ],
+          "ok": true
+        },
+        {
+          "case": "table explained",
+          "slide": 5,
+          "expected": [],
+          "flagged": [],
+          "ok": true
+        }
+      ]
+    },
+    {
+      "engine": "rule engine (no API key), hold-out set",
+      "cases": 6,
+      "exact_match": 5,
+      "precision": 0.8571428571428571,
+      "recall": 1.0,
+      "per_category": {
+        "slide_speech_consistency": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "tp": 2,
+          "fp": 0,
+          "fn": 0
+        },
+        "reading_slide": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "tp": 1,
+          "fp": 0,
+          "fn": 0
+        },
+        "off_topic": {
+          "precision": 0.5,
+          "recall": 1.0,
+          "tp": 1,
+          "fp": 1,
+          "fn": 0
+        },
+        "visual_gap": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "tp": 2,
+          "fp": 0,
+          "fn": 0
+        }
+      },
+      "latency_ms": {
+        "median": 0.4,
+        "max": 0.5
+      },
+      "rows": [
+        {
+          "case": "wrong recall value",
+          "slide": 6,
+          "expected": [
+            "slide_speech_consistency"
+          ],
+          "flagged": [
+            "slide_speech_consistency"
+          ],
+          "ok": true
+        },
+        {
+          "case": "wrong training size",
+          "slide": 4,
+          "expected": [
+            "slide_speech_consistency"
+          ],
+          "flagged": [
+            "slide_speech_consistency"
+          ],
+          "ok": true
+        },
+        {
+          "case": "number said in words",
+          "slide": 2,
+          "expected": [],
+          "flagged": [],
+          "ok": true
+        },
+        {
+          "case": "bullets read aloud",
+          "slide": 6,
+          "expected": [
+            "reading_slide"
+          ],
+          "flagged": [
+            "reading_slide"
+          ],
+          "ok": true
+        },
+        {
+          "case": "chart only gestured at",
+          "slide": 4,
+          "expected": [
+            "visual_gap"
+          ],
+          "flagged": [
+            "off_topic",
+            "visual_gap"
+          ],
+          "ok": false
+        },
+        {
+          "case": "off topic on diagram slide",
+          "slide": 3,
+          "expected": [
+            "off_topic",
+            "visual_gap"
+          ],
+          "flagged": [
+            "off_topic",
+            "visual_gap"
+          ],
+          "ok": true
+        }
+      ]
+    }
+  ],
+  "grounding": {
+    "fabricated": 4,
+    "fabricated_rejected": 4,
+    "genuine_kept": true
+  },
+  "delivery": {
+    "checks": {
+      "wpm (expected 147)": true,
+      "fillers (expected 4)": true,
+      "pauses >=1.5s (expected 2)": true,
+      "long pauses >=4s (expected 1)": true
+    },
+    "passed": 4,
+    "total": 4
+  }
+}

@@ -6,13 +6,16 @@ import logging
 from typing import Optional
 
 from ..analysis.evidence import compute_evidence
-from ..analysis.text_utils import STOPWORDS, normalize, numbers_in, stems, tech_terms, words
+from ..analysis.text_utils import STOPWORDS, is_claim_line, is_contact_line, normalize, numbers_in, stems, tech_terms, words
 from ..models import AnswerEvaluation, FeedbackItem, Question, SlideContext
 from . import prompts
 from .llm import LLMError, get_llm
 from .slide_context import slide_payload
 
 log = logging.getLogger("pitchmirror.agents.audience")
+
+ACTION_RE = re.compile(r"\b(developed|built|designed|implemented|created|led|deployed|engineered|trained|automated|"
+                       r"architected|optimi[sz]ed|integrated|launched|debugged|validated)\b", re.IGNORECASE)
 
 REASONING_MARKERS = {"because", "since", "so", "therefore", "chose", "choose", "trade", "tradeoff", "compared",
                      "instead", "measured", "tested", "evaluated", "benchmark", "result", "data", "assume", "assumption"}
@@ -54,7 +57,14 @@ def rule_question(slide: SlideContext, transcript: str, feedback: list[FeedbackI
             else:
                 q = f"Can you explain what the {v['kind']} on this slide shows and why it matters?"
             candidates.append((q, f"The {v['kind']} was not clearly explained.", "medium"))
-    numeric_lines = [l for l in slide.text if numbers_in(l)]
+    if mode == "interview":
+        # resumes and project decks: ask about what the candidate did, not about dates or grades
+        work = [l for l in slide.text if ACTION_RE.search(l) and not is_contact_line(l) and len(l.split()) >= 5]
+        spoken = [l for l in work if stems(l) & stems(transcript)]
+        for line in (spoken or work)[:3]:
+            candidates.append((f"You wrote '{line[:90]}'. What was your specific contribution, and what was the hardest problem you solved there?",
+                               "Probes ownership and depth behind an experience or project claim.", "medium"))
+    numeric_lines = [l for l in slide.text if is_claim_line(l)]
     for line in numeric_lines[:3]:
         if mode == "pitch":
             q = f"Your slide claims '{line[:90]}'. What assumptions and data are behind that number?"

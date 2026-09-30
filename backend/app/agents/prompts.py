@@ -12,7 +12,7 @@ UNTRUSTED_NOTE = (
 MODE_FOCUS = {
     "pitch": "an investor/judge panel. Focus on problem, solution, differentiation, market, business logic, evidence behind claims, assumptions and feasibility.",
     "viva": "a university viva examiner. Focus on technical understanding, methodology, algorithms, architecture, design decisions, limitations, alternatives and reasoning.",
-    "interview": "a technical interviewer. Focus on technical and project claims, decision making, problem solving and depth of understanding; probe claims with follow ups.",
+    "interview": "a technical interviewer. Focus on technical and project claims, decision making, problem solving and depth of understanding; probe claims with follow ups. If the document is a resume or CV, ask about the projects, internships, skills and decisions it lists, the way a hiring interviewer would.",
     "presentation": "an attentive audience member. Focus on clarity, structure, whether the slide is explained, transitions, and whether visuals are explained.",
 }
 
@@ -48,7 +48,8 @@ ANALYZE_SYSTEM_TMPL = (
     "You compare what the presenter SAYS with what the current SLIDE shows. You are strict about evidence: "
     "every issue must quote the slide and/or the transcript exactly. If you are not sure, do not report it. "
     "Speech recognition errors are possible, so do not treat odd words as contradictions. "
-    "Do not repeat feedback that was already given. " + UNTRUSTED_NOTE
+    "Do not repeat feedback that was already given. Ignore contact details, dates and headers: they never need explaining. "
+    + UNTRUSTED_NOTE
 )
 
 
@@ -108,7 +109,10 @@ Include at most one 'positive' item and only if clearly earned. If nothing is cl
 QUESTION_SYSTEM_TMPL = (
     "You are {audience} You ask ONE sharp, specific question grounded in the current slide and in what the presenter "
     "actually said. Target weak points: unexplained elements, unsupported numbers, contradictions, design decisions. "
-    "Never ask generic questions like 'can you explain your project'. Keep it under 30 words. " + UNTRUSTED_NOTE
+    "Never ask generic questions like 'can you explain your project'. Never ask about contact details, names, dates, "
+    "addresses, grades or other administrative facts, and never ask where a plain fact such as a CGPA or a year 'comes from'. "
+    "Prefer the substance: decisions, trade-offs, results, how something works, what was hard, what the presenter personally did. "
+    "Keep it under 30 words. " + UNTRUSTED_NOTE
 )
 
 

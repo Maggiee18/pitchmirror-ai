@@ -35,8 +35,34 @@ NUMBER_WORDS = {
 GENERIC_SLIDE_WORDS = {"figure", "fig", "table", "chart", "source", "note", "notes", "example", "overview", "introduction"}
 
 
+# icon fonts in PDFs (phone/mail glyphs) come out as private-use or replacement characters
+JUNK_CHARS_RE = re.compile("[\ue000-\uf8ff\ufffd\u200b-\u200f\u2028\u2029\x00-\x08\x0b\x0c\x0e-\x1f]")
+
+
 def normalize(text: str) -> str:
-    return re.sub(r"\s+", " ", text or "").strip()
+    return re.sub(r"\s+", " ", JUNK_CHARS_RE.sub(" ", text or "")).strip()
+
+
+CONTACT_RE = re.compile(
+    r"[\w.+-]+@[\w-]+\.[\w.]+|https?://|www\.|linkedin|github\.com|\+\d{1,3}[\s-]?\d{5,}|\b\d{10}\b", re.IGNORECASE)
+CLAIM_WORDS = re.compile(
+    r"%|percent|\b(accuracy|precision|recall|f1|map|improv\w*|increas\w*|reduc\w*|decreas\w*|faster|slower|latency|"
+    r"fps|throughput|users?|customers?|revenue|growth|saved?|savings?|cost|x faster|times|speedup|error|loss|score|"
+    r"deaths?|downloads?|conversion|retention)\b", re.IGNORECASE)
+
+
+def is_contact_line(line: str) -> bool:
+    """Email, phone, URL or profile handles: never worth questioning or checking."""
+    return bool(CONTACT_RE.search(line or ""))
+
+
+def is_claim_line(line: str) -> bool:
+    """A line that states a measurable result (vs. a date, grade or ID that just happens to contain a number)."""
+    return bool(numbers_in(line)) and bool(CLAIM_WORDS.search(line or "")) and not is_contact_line(line)
+
+
+def is_year_value(v: float, token: str = "") -> bool:
+    return "%" not in token and 1900 <= v <= 2100 and float(v).is_integer()
 
 
 def words(text: str) -> list[str]:
@@ -134,6 +160,8 @@ def key_phrases(lines: list[str], limit: int = 8) -> list[str]:
     phrases: list[str] = []
     for line in lines:
         line = normalize(line).strip("•-–·* ")
+        if is_contact_line(line):
+            continue
         if len(content_words(line)) >= 1:
             phrases.append(shorten(line))
     if len(phrases) < 3:

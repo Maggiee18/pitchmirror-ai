@@ -78,6 +78,7 @@ class LLMProvider:
     settings: Settings = field(default_factory=get_settings)
     health: ProviderHealth = field(default_factory=ProviderHealth)
     _client: Optional[httpx.AsyncClient] = None
+    _thinking_opts: Optional[list] = None
 
     @property
     def available(self) -> bool:
@@ -147,27 +148,44 @@ class LLMProvider:
         parts: list[dict[str, Any]] = [{"text": prompt}]
         for img in images:
             parts.append({"inline_data": {"mime_type": "image/png", "data": base64.b64encode(img).decode()}})
-        gen_cfg: dict[str, Any] = {
-            "responseMimeType": "application/json",
-            "temperature": temperature,
-            "maxOutputTokens": max_tokens,
-        }
-        if "2.5-flash" in self.model:
-            gen_cfg["thinkingConfig"] = {"thinkingBudget": 0}  # latency matters more than deep thinking here
-        body = {
-            "systemInstruction": {"parts": [{"text": system}]},
-            "contents": [{"role": "user", "parts": parts}],
-            "generationConfig": gen_cfg,
-        }
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent"
-        r = await self.client().post(url, json=body, headers={"x-goog-api-key": self.settings.gemini_api_key})
-        r.raise_for_status()
-        data = r.json()
-        try:
-            cand = data["candidates"][0]
-            return "".join(p.get("text", "") for p in cand["content"]["parts"])
-        except (KeyError, IndexError) as exc:
-            raise LLMError(f"unexpected Gemini response: {str(data)[:200]}") from exc
+        gemini3 = self.model.startswith("gemini-3")
+        while True:
+            gen_cfg: dict[str, Any] = {"responseMimeType": "application/json", "temperature": temperature}
+            thinking = self._gemini_thinking_options()[0] if self._gemini_thinking_options() else None
+            if "2.5-flash" in self.model:
+                gen_cfg["thinkingConfig"] = {"thinkingBudget": 0}  # latency matters more than deep thinking here
+            elif gemini3 and thinking:
+                # Gemini 3 thinks by default and thinking tokens share maxOutputTokens: without this the JSON gets cut off.
+                gen_cfg["thinkingConfig"] = {"thinkingLevel": thinking}
+            if gemini3:
+                gen_cfg["temperature"] = 1.0  # Google advises 1.0 for Gemini 3; lower values can loop
+            gen_cfg["maxOutputTokens"] = max_tokens + (4096 if gemini3 else 0)
+            body = {
+                "systemInstruction": {"parts": [{"text": system}]},
+                "contents": [{"role": "user", "parts": parts}],
+                "generationConfig": gen_cfg,
+            }
+            r = await self.client().post(url, json=body, headers={"x-goog-api-key": self.settings.gemini_api_key})
+            if r.status_code == 400 and "thinkingConfig" in gen_cfg and "think" in r.text.lower() and self._gemini_thinking_options():
+                log.warning("Gemini rejected thinking level %r, trying the next option", thinking)
+                self._thinking_opts = self._gemini_thinking_options()[1:]
+                continue
+            r.raise_for_status()
+            data = r.json()
+            try:
+                cand = data["candidates"][0]
+                text = "".join(p.get("text", "") for p in cand["content"]["parts"] if not p.get("thought"))
+            except (KeyError, IndexError) as exc:
+                raise LLMError(f"unexpected Gemini response: {str(data)[:200]}") from exc
+            if cand.get("finishReason") == "MAX_TOKENS":
+                log.warning("Gemini hit the output token limit (usage %s)", data.get("usageMetadata"))
+            return text
+
+    def _gemini_thinking_options(self) -> list[str]:
+        if not hasattr(self, "_thinking_opts") or self._thinking_opts is None:
+            self._thinking_opts = ["minimal", "low"]
+        return self._thinking_opts
 
     async def _openai(self, system, prompt, images, max_tokens, temperature) -> str:
         content: list[dict[str, Any]] = [{"type": "text", "text": prompt}]

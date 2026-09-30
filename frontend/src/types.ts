@@ -109,6 +109,7 @@ export interface LiveMetrics {
   long_pause_count: number;
   speaking_time_s: number;
   speaking_time_source: string;
+  presence?: { camera: boolean; eye_contact_pct: number | null; face_visible_pct: number | null };
 }
 
 export interface Enrichment {
@@ -190,6 +191,16 @@ export interface Report {
   visuals: { items: { slide_number: number; element: string; explained: string; evidence: string }[]; counts: Record<string, number> };
   questions: { asked: Question[]; weak: Question[] };
   feedback: FeedbackItem[];
+  presence: {
+    used: boolean;
+    raw?: {
+      seconds: number; face_visible_pct: number | null; eye_contact_pct: number | null; looking_down_pct: number | null;
+      turned_away_pct: number | null; long_look_aways: number; longest_look_away_s: number;
+      per_slide: Record<string, { seconds: number; eye_contact_pct: number | null; face_visible_pct: number | null }>;
+    };
+    interpretation?: { kind: "positive" | "improvement"; text: string; suggestion: string }[];
+    caveats?: string[];
+  };
   scores: Score[];
   scores_note: string;
   narrative: {

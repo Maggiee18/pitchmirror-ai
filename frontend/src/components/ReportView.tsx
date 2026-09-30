@@ -160,6 +160,42 @@ export default function ReportView({ sessionId, onHome, onPracticeAgain }: { ses
           </div>
         </section>
 
+        {r.presence?.used && r.presence.raw && (
+          <section className="r-section two-col">
+            <div>
+              <h2>Presence (camera) · raw measurements</h2>
+              <table className="kv">
+                <tbody>
+                  <tr><td>Camera time analysed</td><td>{fmtTime(r.presence.raw.seconds)}</td></tr>
+                  <tr><td>Face visible</td><td>{r.presence.raw.face_visible_pct ?? "–"}%</td></tr>
+                  <tr><td>Facing the audience</td><td>{r.presence.raw.eye_contact_pct ?? "–"}%</td></tr>
+                  <tr><td>Looking down</td><td>{r.presence.raw.looking_down_pct ?? "–"}%</td></tr>
+                  <tr><td>Turned away</td><td>{r.presence.raw.turned_away_pct ?? "–"}%</td></tr>
+                  <tr><td>Look-aways ≥ 6s</td><td>{r.presence.raw.long_look_aways}{r.presence.raw.long_look_aways ? ` (longest ${r.presence.raw.longest_look_away_s}s)` : ""}</td></tr>
+                </tbody>
+              </table>
+              <ul className="caveats">{(r.presence.caveats ?? []).map((c, i) => <li key={i}>{c}</li>)}</ul>
+            </div>
+            <div>
+              <h2>Presence · interpretation</h2>
+              <ul className="interp">
+                {(r.presence.interpretation ?? []).map((x, i) => (
+                  <li key={i} className={x.kind}><span>{x.text}</span>{x.suggestion && <em>{x.suggestion}</em>}</li>
+                ))}
+              </ul>
+              <h3>Eye contact per slide</h3>
+              <table className="grid-table">
+                <thead><tr><th>Slide</th><th>Camera time</th><th>Eye contact</th></tr></thead>
+                <tbody>
+                  {Object.entries(r.presence.raw.per_slide).map(([k, v]) => (
+                    <tr key={k}><td>{k}</td><td>{fmtTime(v.seconds)}</td><td>{v.eye_contact_pct !== null ? `${v.eye_contact_pct}%` : "–"}</td></tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        )}
+
         <section className="r-section">
           <h2>Content consistency</h2>
           {r.consistency.mismatches.length > 0 && (

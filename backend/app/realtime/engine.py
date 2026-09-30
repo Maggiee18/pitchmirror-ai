@@ -17,6 +17,8 @@ from ..agents.llm import get_llm
 from ..agents.slide_analyzer import analyze_slide
 from ..agents.slide_context import enrich_slide
 from ..analysis.delivery import compute_delivery, count_fillers
+from ..analysis.presence import EYE_CONTACT_LOW, LONG_LOOK_AWAY_S
+from ..analysis.presence import clean_sample as clean_presence
 from ..analysis.text_utils import stems
 from ..config import get_settings
 from ..models import FeedbackItem, PauseEvent, Question, TranscriptSegment
@@ -51,6 +53,7 @@ def live_metrics(session: Session) -> dict:
         "filler_total": raw["filler_total"], "fillers": raw["fillers"], "pause_count": raw["pause_count"],
         "long_pause_count": raw["long_pause_count"], "speaking_time_s": raw["speaking_time_s"],
         "speaking_time_source": raw["speaking_time_source"],
+        "presence": session.presence.live(),
     }
 
 
@@ -151,7 +154,12 @@ async def _run_analysis(session: Session, slide_n: int, final: bool) -> None:
         session.rejected_items += result.rejected
         if final:
             session.finalized_slides.add(slide_n)
-        added = await add_feedback(session, result.feedback)
+        fused = [f for f in presence_feedback(session, slide_n, result.state.reading_ratio, final)
+                 if not any(g.slide_number == slide_n and g.id != f.id and "eye contact" in g.observation.lower() for g in session.feedback)]
+        for f in fused:  # camera + transcript fusion is new evidence, so it is not deduplicated against transcript-only items
+            session.feedback.append(f)
+            await broadcast(session, {"type": "feedback", "item": f.model_dump()})
+        added = fused + await add_feedback(session, result.feedback)
         await broadcast(session, {
             "type": "slide_analysis", "state": result.state.model_dump(),
             "rejected_total": session.rejected_items, "error": result.state.last_error or None,
@@ -172,6 +180,45 @@ async def _run_analysis(session: Session, slide_n: int, final: bool) -> None:
         pending = session.analysis_pending.pop(slide_n, None)
         if pending is not None and session.status != "ready":
             schedule_analysis(session, slide_n, pending)
+
+
+def answering_now(msg: dict) -> bool:
+    return bool(msg.get("answering"))
+
+
+def presence_feedback(session: Session, slide_n: int, reading_ratio: float | None, final: bool) -> list[FeedbackItem]:
+    """Fuse camera evidence with transcript evidence. Only possible because we know the slide text."""
+    if not final:
+        return []
+    p = session.presence.per_slide.get(slide_n)
+    if p is None:
+        return []
+    summ = p.summary()
+    ec = summ["eye_contact_pct"]
+    if ec is None or summ["seconds"] < 10:
+        return []
+    items = []
+    if ec < EYE_CONTACT_LOW and reading_ratio is not None and reading_ratio >= 0.25:
+        items.append(FeedbackItem(
+            slide_number=slide_n, kind="improvement", category="reading_slide", severity="medium",
+            observation=f"You read slide {slide_n} off the screen: eye contact was {ec:.0f}% while {int(reading_ratio * 100)}% of your words matched the slide text.",
+            evidence_slide=(session.slide(slide_n).text or [session.slide(slide_n).title])[0][:200],
+            explanation="Camera (head and eye direction) and transcript both point to reading.",
+            suggestion="Know the point of each bullet, face the audience and say it in your own words.",
+        ))
+    elif ec < EYE_CONTACT_LOW:
+        items.append(FeedbackItem(
+            slide_number=slide_n, kind="improvement", category="delivery", severity="low",
+            observation=f"Low eye contact on slide {slide_n} (about {ec:.0f}% of the time).",
+            explanation="Estimated from your webcam, processed in your browser.",
+            suggestion="Deliver the key sentence of this slide to the audience, not the screen.",
+        ))
+    elif ec >= 70 and (reading_ratio is None or reading_ratio < 0.25):
+        items.append(FeedbackItem(
+            slide_number=slide_n, kind="positive", category="strength", severity="low",
+            observation=f"Strong eye contact on slide {slide_n} (about {ec:.0f}%) while explaining in your own words.",
+        ))
+    return items
 
 
 def maybe_auto_question(session: Session, slide_n: int, added: list[FeedbackItem], final: bool) -> None:
@@ -379,6 +426,31 @@ async def handle_message(session: Session, msg: dict) -> None:
                     observation=f"Long pause of {d:.1f}s on this slide.",
                     explanation="Measured by microphone voice activity.",
                     suggestion="If you lost your thread, a short signpost ('the key point here is…') helps you recover."), 120)
+        return
+
+    if t == "presence":
+        if session.status != "live":
+            return
+        sample = clean_presence(msg)
+        if sample is None:
+            return
+        n = int(_num(msg.get("slide_number"), session.current_slide, 1, len(session.slides)))
+        session.presence.add_sample(n, sample)
+        return
+
+    if t == "look_away":
+        if session.status != "live" or answering_now(msg):
+            return
+        d = _num(msg.get("duration_s"), 0, 0, 600)
+        if d >= LONG_LOOK_AWAY_S:
+            n = int(_num(msg.get("slide_number"), session.current_slide, 1, len(session.slides)))
+            session.presence.look_aways.append({"slide_number": n, "duration_s": round(d, 1)})
+            if d >= 8:
+                await _nudge(session, "look_away", FeedbackItem(
+                    slide_number=n, kind="improvement", category="delivery", severity="low",
+                    observation=f"You looked away from the audience for about {d:.0f}s.",
+                    explanation="Estimated from your webcam (head and eye direction), processed in your browser.",
+                    suggestion="Glance at the slide, then turn back and deliver the point."), 90)
         return
 
     if t == "activity":
