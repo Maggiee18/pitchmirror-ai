@@ -73,6 +73,7 @@ class Session:
     analysis_pending: dict[int, bool] = field(default_factory=dict)
     question_pending: bool = False
     presence: PresenceTracker = field(default_factory=PresenceTracker)
+    rehearsal: Optional[dict] = None  # set when this session re-presents one slide of a finished session
 
     # ------------------------------------------------------------------ helpers
     def slide(self, n: int) -> Optional[SlideContext]:
@@ -148,7 +149,7 @@ class Session:
             enrichment=self.enrichment, provider=provider, current_slide=self.current_slide,
             started_at=self.started_at, elapsed_s=round(self.elapsed(), 1), segments=self.segments[-400:],
             feedback=self.feedback, questions=self.questions, metrics=metrics, last_seq=self.last_seq,
-            has_report=self.report is not None, analysis=self.analysis,
+            has_report=self.report is not None, analysis=self.analysis, rehearsal=self.rehearsal,
         )
 
 

@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
-import type { FeedbackItem, Question } from "../types";
+import type { AttemptComparison, FeedbackItem, Question } from "../types";
+import AnswerIntelPanel from "./AnswerIntelPanel";
 
 const KIND_LABEL: Record<string, string> = { positive: "Strength", improvement: "Improve", warning: "Mismatch" };
 const CAT_LABEL: Record<string, string> = {
@@ -10,6 +11,7 @@ const CAT_LABEL: Record<string, string> = {
   off_topic: "Off topic",
   unsupported_claim: "Unsupported claim",
   delivery: "Delivery",
+  cross_slide_consistency: "Earlier vs now",
   strength: "Strength",
 };
 
@@ -26,12 +28,22 @@ export default function FeedbackPanel(props: {
   onSkip: (id: string) => void;
   onSpeak?: (text: string) => void;
   examinerSpeaking?: boolean;
+  retrying?: { id: string; attempt: number } | null;
+  onRetry?: (id: string, attempt: number) => void;
+  onRetryDone?: (id: string, attempt: number, typed: string) => void;
+  onRetryCancel?: () => void;
+  intelPending?: string[];
+  comparisons?: Record<string, AttemptComparison | null>;
 }) {
   const { feedback, questions, currentSlide, questionPending, evaluating, answeringId, live, onAnswer, onDone, onSkip, onSpeak, examinerSpeaking } = props;
   const [filter, setFilter] = useState<"all" | "slide">("all");
 
   const open = questions.filter((q) => q.status === "open");
-  const recentAnswered = questions.filter((q) => q.status === "answered").slice(-1);
+  const { retrying, onRetry, onRetryDone, onRetryCancel, intelPending = [], comparisons = {} } = props;
+  const recentAnswered = questions
+    .filter((q) => q.status === "answered" || (q.attempts?.length ?? 0) > 0 || (retrying && retrying.id === q.id))
+    .filter((q) => q.status !== "open" || (retrying && retrying.id === q.id))
+    .slice(-1);
 
   const items = useMemo(() => {
     const list = filter === "slide" ? feedback.filter((f) => f.slide_number === currentSlide) : feedback;
@@ -57,7 +69,9 @@ export default function FeedbackPanel(props: {
             evaluating={evaluating.includes(q.id)} onAnswer={onAnswer} onDone={onDone} onSkip={onSkip} />
         ))}
         {recentAnswered.map((q) => (
-          <AnsweredCard key={q.id} q={q} />
+          <AnsweredCard key={q.id} q={q} live={live} pending={intelPending.includes(q.id)} comparison={comparisons[q.id]}
+            retryAttempt={retrying && retrying.id === q.id ? retrying.attempt : null}
+            onRetry={onRetry} onRetryDone={onRetryDone} onRetryCancel={onRetryCancel} />
         ))}
         {evaluating.filter((id) => !open.some((q) => q.id === id)).length > 0 && (
           <div className="card-q pending"><span className="spinner" /> Evaluating your answer…</div>
@@ -141,18 +155,38 @@ function QuestionCard({ q, answering, live, evaluating, onAnswer, onDone, onSkip
   );
 }
 
-function AnsweredCard({ q }: { q: Question }) {
+function AnsweredCard({ q, live, pending, comparison, retryAttempt, onRetry, onRetryDone, onRetryCancel }: {
+  q: Question; live: boolean; pending: boolean; comparison?: AttemptComparison | null; retryAttempt: number | null;
+  onRetry?: (id: string, attempt: number) => void; onRetryDone?: (id: string, attempt: number, typed: string) => void; onRetryCancel?: () => void;
+}) {
+  const [typed, setTyped] = useState("");
   const ev = q.evaluation;
-  if (!ev) return null;
+  const attempts = q.attempts ?? [];
+  if (!ev && !attempts.length && !pending) return null;
+  const nextAttempt = (attempts[attempts.length - 1]?.attempt ?? 1) + 1;
   return (
     <article className="card-q answered">
       <div className="fb-head">
         <span className="fb-kind q">Answer feedback</span>
-        {ev.score !== null && <span className={`score-chip s${ev.score}`}>{ev.score}/5{ev.source === "rule" ? " est." : ""}</span>}
+        {ev && ev.score !== null && <span className={`score-chip s${ev.score}`}>{ev.score}/5{ev.source === "rule" ? " est." : ""}</span>}
       </div>
       <p className="q-reason">“{q.question}”</p>
-      {ev.summary && <p className="fb-obs">{ev.summary}</p>}
-      {ev.gaps.length > 0 && <ul className="gaps">{ev.gaps.map((g, i) => <li key={i}>{g}</li>)}</ul>}
+      {ev?.summary && <p className="fb-obs">{ev.summary}</p>}
+      {ev && ev.gaps.length > 0 && !attempts.length && <ul className="gaps">{ev.gaps.map((g, i) => <li key={i}>{g}</li>)}</ul>}
+      <AnswerIntelPanel attempts={attempts} comparison={comparison} pending={pending} compact />
+      {live && onRetry && retryAttempt === null && attempts.length > 0 && attempts.length < 5 && !pending && (
+        <div className="row"><button className="btn small" onClick={() => onRetry(q.id, nextAttempt)}>Try again</button></div>
+      )}
+      {live && retryAttempt !== null && (
+        <div className="q-answer">
+          <div className="rec-hint"><span className="dot rec" /> Attempt {retryAttempt}: answer the same question again, out loud.</div>
+          <textarea value={typed} onChange={(e) => setTyped(e.target.value)} placeholder="Optional: type part of your answer" rows={2} maxLength={1500} />
+          <div className="row">
+            <button className="btn primary small" onClick={() => { onRetryDone?.(q.id, retryAttempt, typed.trim()); setTyped(""); }}>Done answering</button>
+            <button className="btn small ghost" onClick={() => onRetryCancel?.()}>Cancel</button>
+          </div>
+        </div>
+      )}
     </article>
   );
 }

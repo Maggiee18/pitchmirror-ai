@@ -18,6 +18,11 @@ PitchMirror is a real time coach for presentations, vivas, interviews and pitche
 | Delivery | Words per minute, fillers, pauses, repetition, rushed sections | Measured from transcript timing and microphone voice activity |
 | Presence (camera) | Eye contact, looking down, turning to the screen, long look aways. Combined with the transcript it can say *"you read slide 3 off the screen"* | MediaPipe Face Landmarker **in the browser**; only frame counts leave the device |
 | Transparent report | Raw measurements kept separate from interpretation, every score shows how it was calculated | Rule based scoring, optional LLM summary |
+| Answer Intelligence | After every answer: assessment (strong / partial / needs improvement / not verifiable), scores for correctness, relevance, completeness, depth and clarity, what was good, what was missing, a stronger answer and why it is stronger | LLM with schema validation; the stronger answer is withheld if it mentions any technology or number not found in your slides, speech or answer |
+| Try Again | Answer the same question again and see attempt 1 vs attempt 2, plus a hint question if you are stuck | Deterministic comparison, shown only when both attempts were scored the same way |
+| Technical communication | Technical language density (term uses / meaningful words), terms explained vs not, audience fit for the selected mode, audience friendly rewordings | Deterministic extraction and arithmetic, AI judgement of explanations and audience fit with a labelled rule of thumb fallback |
+| Claims and presentation memory | Detects quantitative, technical and subjective claims, flags ones without slide evidence with a question to prepare for, and live flags potential cross slide contradictions ("MongoDB on slide 3, PostgreSQL on slide 8") | Deterministic candidates, AI refinement validated against them |
+| Weakest slide rehearsal | Picks the slide with the most evidence of trouble (weights shown), lets you rehearse just that slide and compares before and after | Deterministic |
 
 ## Quick start
 
@@ -51,7 +56,8 @@ Docker: `docker build -t pitchmirror . && docker run -p 7860:7860 --env-file .en
 3. On **slide 4**, say *"Our YOLOv8 model improves accuracy by 25 percent over YOLOv5"* and don't mention the chart. Press →.
 4. A red **Mismatch** card appears with both quotes, and the examiner **asks aloud** which number is correct.
 5. Click **Answer**, reply out loud, click **Done answering**. Your answer is scored and a **follow up** builds on what you said.
-6. **End presentation** for the report: delivery, presence, slide by slide consistency, visuals, questions and transparent scores.
+6. Answer analysis appears under the question: what was good, what was missing and a stronger answer. Click **Try again** and answer better to see the improvement.
+7. **End presentation** for the report: delivery, presence, slide by slide consistency, visuals, Q&A intelligence, technical communication, claims, and the weakest slide with a **Rehearse** button.
 
 ## How it works
 
@@ -79,6 +85,8 @@ Slide changes ──────────────────────
 | Consistency + visuals | `analysis/evidence.py`, `agents/slide_analyzer.py` | Evidence deterministic, reasoning AI with rule fallback |
 | Audience | `agents/audience.py` | AI with grounded rule fallback |
 | Report | `agents/report.py` | Deterministic sections and scores, AI summary optional |
+| Answer Intelligence | `agents/answer_intel.py` | AI with validation and grounding, rule fallback |
+| Intelligence report | `agents/intelligence_report.py`, `analysis/tech_comm.py`, `analysis/claims.py`, `analysis/memory.py`, `analysis/rehearsal.py` | Deterministic measurement, optional AI refinement |
 | Real time engine | `realtime/engine.py`, `realtime/session.py` | Async, non blocking |
 
 LangGraph was deliberately not used: the flow is event driven rather than a multi step plan, and a plain async orchestrator is faster and easier to debug in a live demo.
@@ -103,6 +111,7 @@ Test suite (runs in GitHub Actions on every push, together with a frontend build
 cd backend && python -m pytest -q                         # unit, WebSocket integration, provider, benchmark and security tests
 python scripts/e2e_demo.py http://127.0.0.1:8000          # full browser demo with scripted speech, fake mic and camera
 python scripts/e2e_failures.py http://127.0.0.1:8000      # invalid file, too many slides, no microphone, typing fallback
+python scripts/e2e_intelligence.py http://127.0.0.1:8000  # answer analysis, Try Again, extended report, weakest slide rehearsal
 ```
 
 ## Reliability

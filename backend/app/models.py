@@ -22,6 +22,7 @@ FEEDBACK_CATEGORIES = (
     "unsupported_claim",  # claim in speech not backed by slide
     "delivery",  # pace, fillers, pauses, repetition
     "strength",  # something done well
+    "cross_slide_consistency",  # potential contradiction with an earlier slide (presentation memory)
 )
 
 
@@ -80,6 +81,50 @@ class AnswerEvaluation(BaseModel):
     source: Literal["rule", "ai"] = "rule"
 
 
+AnswerAssessment = Literal[
+    "strongly_correct", "mostly_correct", "partially_correct", "incorrect", "insufficient_evidence", "unable_to_determine"
+]
+
+
+class AnswerScores(BaseModel):
+    """0-100 per dimension; None means it could not be determined (never a guessed number)."""
+
+    correctness: Optional[int] = None
+    relevance: Optional[int] = None
+    completeness: Optional[int] = None
+    technical_depth: Optional[int] = None
+    clarity: Optional[int] = None
+
+    def overall(self) -> Optional[int]:
+        vals = [v for v in (self.correctness, self.relevance, self.completeness, self.technical_depth, self.clarity) if v is not None]
+        return round(sum(vals) / len(vals)) if len(vals) >= 3 else None
+
+
+class AnswerIntelligence(BaseModel):
+    """Answer Intelligence layer: additive to AnswerEvaluation, never replaces it."""
+
+    assessment: AnswerAssessment = "unable_to_determine"
+    scores: AnswerScores = Field(default_factory=AnswerScores)
+    depth_level: Optional[Literal["surface", "moderate", "strong", "deep"]] = None
+    justification: list[str] = Field(default_factory=list)  # which of why/how/trade-offs/evidence/project-specific were present
+    what_was_good: list[str] = Field(default_factory=list)
+    what_was_missing: list[str] = Field(default_factory=list)
+    could_be_stronger: list[str] = Field(default_factory=list)
+    better_answer: str = ""
+    why_better: list[str] = Field(default_factory=list)
+    retry_recommended: bool = False
+    scaffold_question: str = ""
+    note: str = ""
+    source: Literal["rule", "ai"] = "rule"
+
+
+class AnswerAttempt(BaseModel):
+    attempt: int
+    answer_text: str
+    intel: Optional[AnswerIntelligence] = None
+    created_at: float = Field(default_factory=time.time)
+
+
 class Question(BaseModel):
     id: str = Field(default_factory=lambda: new_id("q"))
     slide_number: int
@@ -93,6 +138,7 @@ class Question(BaseModel):
     evaluation: Optional[AnswerEvaluation] = None
     source: Literal["rule", "ai"] = "rule"
     created_at: float = Field(default_factory=time.time)
+    attempts: list[AnswerAttempt] = Field(default_factory=list)  # Answer Intelligence per attempt (1 = original answer)
 
 
 class TranscriptSegment(BaseModel):
@@ -104,6 +150,7 @@ class TranscriptSegment(BaseModel):
     kind: Literal["speech", "answer"] = "speech"
     question_id: Optional[str] = None
     source: Literal["browser", "whisper", "typed"] = "browser"
+    attempt: int = 1  # answer attempt number for "Try Again" (answer segments only)
 
 
 class PauseEvent(BaseModel):
@@ -149,3 +196,4 @@ class SessionPublic(BaseModel):
     last_seq: int
     has_report: bool
     analysis: dict[int, SlideAnalysisState] = Field(default_factory=dict)
+    rehearsal: Optional[dict] = None

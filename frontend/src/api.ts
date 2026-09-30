@@ -45,6 +45,11 @@ export const api = {
     const body = await parse<{ text: string }>(r);
     return body.text;
   },
+  rehearse(id: string, slide: number): Promise<SessionData> {
+    const fd = new FormData();
+    fd.append("slide_number", String(slide));
+    return fetch(`/api/sessions/${encodeURIComponent(id)}/rehearse`, { method: "POST", body: fd }).then((r) => parse<SessionData>(r));
+  },
   slideUrl: (id: string, n: number) => `/api/sessions/${encodeURIComponent(id)}/slides/${n}.png`,
 };
 

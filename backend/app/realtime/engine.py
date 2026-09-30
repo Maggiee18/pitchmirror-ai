@@ -12,16 +12,17 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from ..agents import audience
+from ..agents import answer_intel, audience
 from ..agents.llm import get_llm
 from ..agents.slide_analyzer import analyze_slide
 from ..agents.slide_context import enrich_slide
 from ..analysis.delivery import compute_delivery, count_fillers
+from ..analysis.memory import find_inconsistencies, memory_feedback, statements_from
 from ..analysis.presence import EYE_CONTACT_LOW, LONG_LOOK_AWAY_S
 from ..analysis.presence import clean_sample as clean_presence
 from ..analysis.text_utils import stems
 from ..config import get_settings
-from ..models import FeedbackItem, PauseEvent, Question, TranscriptSegment
+from ..models import AnswerAttempt, FeedbackItem, PauseEvent, Question, TranscriptSegment
 from .session import Session
 
 log = logging.getLogger("pitchmirror.engine")
@@ -160,6 +161,11 @@ async def _run_analysis(session: Session, slide_n: int, final: bool) -> None:
             session.feedback.append(f)
             await broadcast(session, {"type": "feedback", "item": f.model_dump()})
         added = fused + await add_feedback(session, result.feedback)
+        if final:  # presentation memory: cheap deterministic cross-slide check (additive)
+            try:
+                added += await add_feedback(session, memory_feedback(session_inconsistencies(session), slide_n))
+            except Exception:
+                log.exception("presentation memory check failed")
         await broadcast(session, {
             "type": "slide_analysis", "state": result.state.model_dump(),
             "rejected_total": session.rejected_items, "error": result.state.last_error or None,
@@ -180,6 +186,14 @@ async def _run_analysis(session: Session, slide_n: int, final: bool) -> None:
         pending = session.analysis_pending.pop(slide_n, None)
         if pending is not None and session.status != "ready":
             schedule_analysis(session, slide_n, pending)
+
+
+def session_inconsistencies(session: Session) -> list[dict]:
+    statements = []
+    for seg in session.segments:
+        if seg.kind == "speech":
+            statements += statements_from(seg.slide_number, seg.text)
+    return find_inconsistencies(statements, session.slides)
 
 
 def answering_now(msg: dict) -> bool:
@@ -276,6 +290,10 @@ async def _run_question(session: Session, slide_n: int, auto: bool) -> None:
 async def _evaluate_answer(session: Session, q: Question) -> None:
     answer = " ".join(s.text for s in session.segments if s.kind == "answer" and s.question_id == q.id).strip()
     q.answer_text = answer[:4000]
+    # Answer Intelligence runs in parallel and never delays the existing evaluation or follow up
+    first = " ".join(s.text for s in session.segments
+                     if s.kind == "answer" and s.question_id == q.id and s.attempt == 1).strip()
+    session.track(_run_answer_intel(session, q, 1, first))
     await broadcast(session, {"type": "question_update", "item": q.model_dump(), "evaluating": True})
     slide = session.slide(q.slide_number) or session.slides[0]
     try:
@@ -291,6 +309,40 @@ async def _evaluate_answer(session: Session, q: Question) -> None:
     await broadcast(session, {"type": "question_update", "item": q.model_dump(), "evaluating": False})
     if follow is not None and session.status == "live":
         await add_question(session, follow)
+
+
+async def _run_answer_intel(session: Session, q: Question, attempt: int, answer: str) -> None:
+    """Additive analysis layer. Any failure is reported to the UI and swallowed; the session always continues."""
+    try:
+        await broadcast(session, {"type": "answer_intel_pending", "question_id": q.id, "attempt": attempt, "active": True})
+        slide = session.slide(q.slide_number) or session.slides[0]
+        context = session.speech_text(q.slide_number) or session.recent_speech()
+        previous = [a for a in q.attempts if a.attempt < attempt]
+        try:
+            intel = await asyncio.wait_for(
+                answer_intel.analyze_answer(q, answer, slide, session.mode, context, attempt, previous),
+                timeout=get_settings().llm_timeout_seconds + 10,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            log.warning("answer intelligence failed: %s", exc)
+            intel = answer_intel.rule_intel(q.question, answer, slide)
+            intel.note = "Answer analysis unavailable; showing a basic rule based check. Your presentation can continue normally."
+        att = AnswerAttempt(attempt=attempt, answer_text=answer[:4000], intel=intel)
+        q.attempts = [a for a in q.attempts if a.attempt != attempt] + [att]
+        q.attempts.sort(key=lambda a: a.attempt)
+        comparison = answer_intel.compare_attempts(q.attempts[0], att) if attempt > 1 else None
+        await broadcast(session, {"type": "answer_intel", "question_id": q.id, "attempt": attempt,
+                                  "item": q.model_dump(), "comparison": comparison})
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        log.exception("answer intelligence crashed")
+        await broadcast(session, {"type": "notice", "level": "warn",
+                                  "message": "Answer analysis unavailable. Your presentation can continue normally."})
+    finally:
+        await broadcast(session, {"type": "answer_intel_pending", "question_id": q.id, "attempt": attempt, "active": False})
 
 
 # ----------------------------------------------------------------------------- live delivery nudges
@@ -389,6 +441,7 @@ async def handle_message(session: Session, msg: dict) -> None:
                 kind="answer" if msg.get("kind") == "answer" else "speech",
                 question_id=msg.get("question_id") if isinstance(msg.get("question_id"), str) else None,
                 source=msg.get("source") if msg.get("source") in ("browser", "whisper", "typed") else "browser",
+                attempt=int(_num(msg.get("attempt"), 1, 1, 10)),
             )
         except ValidationError:
             return
@@ -478,6 +531,25 @@ async def handle_message(session: Session, msg: dict) -> None:
                                                       t_start=session.elapsed(), t_end=session.elapsed(), kind="answer",
                                                       question_id=q.id, source="typed"))
         session.track(_evaluate_answer(session, q))
+        return
+
+    if t == "retry_done":  # "Try Again": a new attempt at an already answered question
+        q = session.question(str(msg.get("question_id") or ""))
+        if q is None or q.status == "skipped" or not q.attempts:
+            return
+        attempt = int(_num(msg.get("attempt"), len(q.attempts) + 1, 2, 10))
+        if attempt > 5:
+            await broadcast(session, {"type": "notice", "level": "info", "message": "That's the maximum number of retries for this question."})
+            return
+        typed = str(msg.get("typed_answer") or "").strip()[:MAX_SEGMENT_CHARS]
+        if typed:
+            session.last_seq += 1
+            session.segments.append(TranscriptSegment(seq=session.last_seq, text=typed, slide_number=q.slide_number,
+                                                      t_start=session.elapsed(), t_end=session.elapsed(), kind="answer",
+                                                      question_id=q.id, source="typed", attempt=attempt))
+        answer = " ".join(s.text for s in session.segments
+                          if s.kind == "answer" and s.question_id == q.id and s.attempt == attempt).strip()
+        session.track(_run_answer_intel(session, q, attempt, answer))
         return
 
     if t == "skip_question":

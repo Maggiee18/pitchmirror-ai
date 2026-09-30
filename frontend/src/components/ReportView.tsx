@@ -3,9 +3,25 @@ import { api, fmtTime } from "../api";
 import type { Report, Score } from "../types";
 import { MODE_INFO } from "../types";
 import { Logo } from "./Home";
+import IntelligenceSections, { RehearsalComparison } from "./IntelligenceSections";
 
-export default function ReportView({ sessionId, onHome, onPracticeAgain }: { sessionId: string; onHome: () => void; onPracticeAgain: () => void }) {
+export default function ReportView({ sessionId, onHome, onPracticeAgain, onOpenSession, onOpenReport }: {
+  sessionId: string; onHome: () => void; onPracticeAgain: () => void;
+  onOpenSession?: (id: string) => void; onOpenReport?: (id: string) => void;
+}) {
   const [report, setReport] = useState<Report | null>(null);
+  const [rehearsing, setRehearsing] = useState(false);
+  const rehearse = async (slide: number) => {
+    setRehearsing(true);
+    try {
+      const s = await api.rehearse(sessionId, slide);
+      onOpenSession?.(s.id);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not start the rehearsal");
+    } finally {
+      setRehearsing(false);
+    }
+  };
   const [status, setStatus] = useState<string>("loading");
   const [error, setError] = useState<string | null>(null);
 
@@ -105,6 +121,8 @@ export default function ReportView({ sessionId, onHome, onPracticeAgain }: { ses
           </div>
           {n.summary && <p className="r-summary">{n.summary}</p>}
         </section>
+
+        {r.intelligence && <RehearsalComparison intel={r.intelligence} onOpenReport={onOpenReport} />}
 
         <section className="r-section">
           <h2>Scores <span className="est">estimates</span></h2>
@@ -274,6 +292,8 @@ export default function ReportView({ sessionId, onHome, onPracticeAgain }: { ses
             {n.practice_questions.map((p, i) => <li key={i}>{p.question} {p.slide_number ? <span className="muted small">(slide {p.slide_number})</span> : null}</li>)}
           </ul>
         </section>
+
+        {r.intelligence && <IntelligenceSections intel={r.intelligence} onRehearse={onOpenSession ? rehearse : undefined} rehearsing={rehearsing} />}
 
         <footer className="r-foot muted small">
           Analysis: {r.provider.mode === "ai" ? `${r.provider.name} ${r.provider.model}` : "rule engine (no AI model configured)"} · Transcripts and feedback are held in server memory only and are deleted when the session expires.

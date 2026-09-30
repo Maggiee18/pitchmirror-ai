@@ -17,6 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 
 from .agents.llm import get_llm
+from .analysis.rehearsal import slide_metrics
 from .config import ROOT_DIR, get_settings
 from .ingest import detect_kind, parse_presentation
 from .realtime import engine
@@ -232,6 +233,31 @@ async def delete_session(sid: str):
     _session_or_404(sid)
     store.delete(sid)
     return {"deleted": True}
+
+
+@app.post("/api/sessions/{sid}/rehearse")
+async def rehearse(request: Request, sid: str, slide_number: int = Form(...)):
+    """Start a focused rehearsal of one slide from a finished session (additive feature)."""
+    parent = _session_or_404(sid)
+    slide = parent.slide(slide_number)
+    if slide is None:
+        raise HTTPException(404, "Slide not found")
+    if parent.status != "ended":
+        raise HTTPException(409, "Finish the presentation before rehearsing a slide.")
+    _guard_new_session(request)
+    new_sid = store.new_id()
+    session_dir = settings.data_path / new_sid
+    session_dir.mkdir(parents=True)
+    for s in parent.slides:
+        src = parent.dir / s.image_file
+        if s.image_file and src.is_file():
+            shutil.copy2(src, session_dir / s.image_file)
+    child = store.create(parent.filename, parent.mode, [s.model_copy(deep=True) for s in parent.slides], session_dir, new_sid)
+    child.enrichment = dict(parent.enrichment)
+    child.current_slide = slide_number
+    child.rehearsal = {"parent_id": parent.id, "slide_number": slide_number, "slide_title": slide.title or f"Slide {slide_number}",
+                       "baseline": slide_metrics(parent, slide_number)}
+    return child.public(engine.provider_info(), engine.live_metrics(child)).model_dump()
 
 
 @app.get("/api/sessions/{sid}/slides/{n}.png")

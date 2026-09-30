@@ -36,6 +36,8 @@ export default function App() {
         sessionId={route.id}
         onHome={() => go({ view: "home" })}
         onPracticeAgain={() => go({ view: "present", id: route.id })}
+        onOpenSession={(id) => go({ view: "present", id })}
+        onOpenReport={(id) => go({ view: "report", id })}
       />
     );
   return <Home onSession={(id) => go({ view: "present", id })} />;

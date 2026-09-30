@@ -37,8 +37,8 @@
         }
       },
       "latency_ms": {
-        "median": 0.5,
-        "max": 0.7
+        "median": 0.7,
+        "max": 0.8
       },
       "rows": [
         {
@@ -199,8 +199,8 @@
         }
       },
       "latency_ms": {
-        "median": 0.4,
-        "max": 0.5
+        "median": 0.6,
+        "max": 0.7
       },
       "rows": [
         {

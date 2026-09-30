@@ -48,6 +48,51 @@ export interface AnswerEvaluation {
   source: "rule" | "ai";
 }
 
+export type AnswerAssessment =
+  | "strongly_correct" | "mostly_correct" | "partially_correct" | "incorrect" | "insufficient_evidence" | "unable_to_determine";
+
+export interface AnswerScores {
+  correctness: number | null;
+  relevance: number | null;
+  completeness: number | null;
+  technical_depth: number | null;
+  clarity: number | null;
+}
+
+export interface AnswerIntelligence {
+  assessment: AnswerAssessment;
+  scores: AnswerScores;
+  depth_level: "surface" | "moderate" | "strong" | "deep" | null;
+  justification: string[];
+  what_was_good: string[];
+  what_was_missing: string[];
+  could_be_stronger: string[];
+  better_answer: string;
+  why_better: string[];
+  retry_recommended: boolean;
+  scaffold_question: string;
+  note: string;
+  source: "rule" | "ai";
+}
+
+export interface AnswerAttempt {
+  attempt: number;
+  answer_text: string;
+  intel: AnswerIntelligence | null;
+  created_at: number;
+}
+
+export interface AttemptComparison {
+  comparable: boolean;
+  reliable?: boolean;
+  reason?: string;
+  metric?: string;
+  before?: number;
+  after?: number;
+  delta?: number;
+  dimensions?: Record<string, { before: number; after: number; delta: number }>;
+}
+
 export interface Question {
   id: string;
   slide_number: number;
@@ -61,6 +106,7 @@ export interface Question {
   evaluation: AnswerEvaluation | null;
   source: "rule" | "ai";
   created_at: number;
+  attempts?: AnswerAttempt[];
 }
 
 export interface Segment {
@@ -72,6 +118,7 @@ export interface Segment {
   kind: "speech" | "answer";
   question_id: string | null;
   source: "browser" | "whisper" | "typed";
+  attempt?: number;
 }
 
 export interface VisualStatus {
@@ -138,6 +185,49 @@ export interface SessionData {
   last_seq: number;
   has_report: boolean;
   analysis: Record<string, SlideAnalysis>;
+  rehearsal?: Rehearsal | null;
+}
+
+export type SlideMetrics = Record<string, number | null>;
+
+export interface Rehearsal {
+  parent_id: string;
+  slide_number: number;
+  slide_title: string;
+  baseline: SlideMetrics;
+}
+
+export interface QAAttemptReport {
+  attempt: number; answer: string; assessment: AnswerAssessment | null; overall: number | null;
+  scores: AnswerScores | null; what_was_good: string[]; what_was_missing: string[]; could_be_stronger: string[];
+  better_answer: string; why_better: string[]; note: string; source: "rule" | "ai" | null;
+}
+
+export interface Intelligence {
+  error?: string;
+  qa: {
+    items: { question_id: string; question: string; slide_number: number; depth: number; attempts: QAAttemptReport[];
+      latest_assessment: AnswerAssessment | null; weak: boolean;
+      retry: { comparable: boolean; before?: number; after?: number; delta?: number; attempts: number; reason?: string } | null }[];
+    strongest: string[];
+    weakest: string[];
+  };
+  technical_communication: {
+    meaningful_words: number; technical_occurrences: number; unique_terms: number; density_pct: number | null; formula: string;
+    terms_detected: number; terms_explained: number; terms_needing_explanation: number; note: string;
+    key_terms: { term: string; count: number; explained: "yes" | "partial" | "no"; explained_source: string; simplification: string; contexts: string[] }[];
+    audience: { level: "appropriate" | "consider_simplifying" | "likely_difficult" | null; rationale: string; source: string; mode: Mode };
+  };
+  claims: { items: { slide_number: number; claim: string; type: string; needs_evidence: boolean; evidence: string; challenge: string; source: string }[]; needing_evidence: number };
+  consistency_memory: { category: string; message: string; earlier: { slide_number: number; sentence: string }; later: { slide_number: number; sentence: string } }[];
+  weakest_slide: {
+    slide_number: number | null; title?: string; points?: number; message?: string;
+    reasons?: { reason: string; detail: string; points: number }[];
+    ranking: { slide_number: number; title: string; points: number }[];
+    weights: Record<string, number>;
+  } | null;
+  rehearsal: { parent_id: string; slide_number: number; slide_title: string;
+    changes: { metric: string; label: string; before: number; after: number; improved: boolean | null }[] } | null;
 }
 
 export interface Health {
@@ -203,6 +293,7 @@ export interface Report {
   };
   scores: Score[];
   scores_note: string;
+  intelligence?: Intelligence;
   narrative: {
     summary: string;
     top_recommendations: { title: string; detail: string; evidence: string }[];
@@ -230,7 +321,9 @@ export type ServerEvent =
   | { type: "report_ready" }
   | { type: "notice"; level: "info" | "warn" | "error"; message: string }
   | { type: "fatal"; message: string }
-  | { type: "pong"; t?: number };
+  | { type: "pong"; t?: number }
+  | { type: "answer_intel"; question_id: string; attempt: number; item: Question; comparison: AttemptComparison | null }
+  | { type: "answer_intel_pending"; question_id: string; attempt: number; active: boolean };
 
 export const MODE_INFO: Record<Mode, { label: string; blurb: string; audience: string }> = {
   pitch: { label: "Pitch", blurb: "Problem, differentiation, evidence behind your numbers.", audience: "Investor panel" },

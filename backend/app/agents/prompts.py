@@ -182,3 +182,82 @@ Return JSON:
   "practice_questions": [{{"question": "...", "slide_number": 0, "why": "which weak area it targets"}}]
 }}
 Give 3-5 recommendations and 4-6 practice questions not already asked."""
+
+
+# ----------------------------------------------------------------------------- Answer Intelligence (additive)
+ANSWER_INTEL_SYSTEM_TMPL = (
+    "You are {audience} You coach the presenter on ONE spoken answer. Judge only against the question, the slide and "
+    "the presentation context provided. If correctness cannot be verified from that context, say so with assessment "
+    "'unable_to_determine' and correctness null; never guess. Give feedback for strong answers too. Speech-to-text "
+    "errors are possible. " + UNTRUSTED_NOTE
+)
+
+
+def answer_intel_prompt(question: str, answer: str, slide: dict, context: str, mode: str, attempt: int,
+                        previous: list[dict]) -> str:
+    return f"""Mode: {mode}
+Question: {question}
+
+Relevant slide:
+{slide_block(slide)}
+
+What the presenter said while presenting (context):
+<context>
+{context}
+</context>
+
+Earlier attempts at this same question: {json.dumps(previous, ensure_ascii=False)}
+
+Answer attempt {attempt}:
+<answer>
+{answer}
+</answer>
+
+Return JSON:
+{{
+  "assessment": "strongly_correct|mostly_correct|partially_correct|incorrect|insufficient_evidence|unable_to_determine",
+  "scores": {{"correctness": 0-100 or null, "relevance": 0-100, "completeness": 0-100, "technical_depth": 0-100, "clarity": 0-100}},
+  "depth_level": "surface|moderate|strong|deep",
+  "justification": ["which of: why, how, trade-offs, evidence, project-specific reasoning the answer actually contains"],
+  "what_was_good": ["specific, quote or paraphrase the answer"],
+  "what_was_missing": ["what the question expected that the answer did not give"],
+  "could_be_stronger": ["for good answers: what would make it even stronger"],
+  "better_answer": "a concise, speakable improved answer in the presenter's voice (2-4 sentences)",
+  "why_better": ["short reasons the improved answer is stronger"],
+  "retry_recommended": true|false,
+  "scaffold_question": "if the answer was weak: a smaller guiding question that helps them reason, without giving the answer; else empty"
+}}
+Rules for better_answer: keep the presenter's meaning; use ONLY facts found in the question, slide, context or their answer;
+never add technologies, numbers or results they did not state; if you cannot improve it without inventing facts, return an
+empty better_answer. Relevance means whether it answers THIS question, not whether it is about the project.
+Technical depth is relative to the mode ({mode}); clarity is about structure, not about avoiding technical words."""
+
+
+TECH_COMM_SYSTEM = (
+    "You assess technical communication for a presentation coach. Technical language is not bad; judge whether it fits "
+    "the audience of the selected mode and whether key terms were explained where needed. Use only the evidence given. "
+    + UNTRUSTED_NOTE
+)
+
+
+def tech_comm_prompt(mode: str, measured: dict, terms: list[dict], claims: list[dict]) -> str:
+    return f"""Mode: {mode}
+Measured by code (trust these numbers): {json.dumps(measured, ensure_ascii=False)}
+
+Technical terms with the sentences where they were spoken:
+<context>
+{json.dumps(terms, ensure_ascii=False)}
+</context>
+
+Claims the presenter made (with slide evidence found by code):
+<context>
+{json.dumps(claims, ensure_ascii=False)}
+</context>
+
+Return JSON:
+{{
+  "terms": [{{"term": "exact term from the list", "explained": "yes|partial|no", "simplification": "an audience-friendly rewording of the sentence, only if useful for this mode, else empty"}}],
+  "audience": {{"level": "appropriate|consider_simplifying|likely_difficult", "rationale": "one or two sentences grounded in the mode and the measurements"}},
+  "claims": [{{"claim": "exact claim text from the list", "type": "factual|quantitative|technical|subjective|opinion", "needs_evidence": true|false, "challenge": "one grounded question an examiner would ask about it, or empty"}}]
+}}
+Only mark needs_evidence when the slide evidence does not support the claim. Keep simplifications technically accurate."""

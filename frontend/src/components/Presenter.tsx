@@ -33,6 +33,7 @@ export default function Presenter({ sessionId, onHome, onReport }: { sessionId: 
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [paused, setPaused] = useState(false);
   const [answeringId, setAnsweringId] = useState<string | null>(null);
+  const [retrying, setRetrying] = useState<{ id: string; attempt: number } | null>(null);
   const [ending, setEnding] = useState(false);
   const [confirmLeave, setConfirmLeave] = useState(false);
   const [cameraWanted, setCameraWanted] = useState<boolean>(() => !!navigator.mediaDevices?.getUserMedia);
@@ -121,14 +122,16 @@ export default function Presenter({ sessionId, onHome, onReport }: { sessionId: 
   const slideRef = useRef(currentSlide);
   slideRef.current = currentSlide;
   const answeringRef = useRef(answeringId);
-  answeringRef.current = answeringId;
+  answeringRef.current = answeringId ?? retrying?.id ?? null;
+  const attemptRef = useRef(1);
+  attemptRef.current = retrying && !answeringId ? retrying.attempt : 1;
 
   const emitText = useCallback(
     (text: string, tStart: number, tEnd: number, source: "browser" | "whisper" | "typed") => {
       const q = answeringRef.current;
       socket.sendTranscript({
         text, t_start: tStart, t_end: tEnd, slide_number: slideRef.current, source,
-        kind: q ? "answer" : "speech", question_id: q,
+        kind: q ? "answer" : "speech", question_id: q, ...(q && attemptRef.current > 1 ? { attempt: attemptRef.current } : {}),
       });
     },
     [socket],
@@ -318,6 +321,7 @@ export default function Presenter({ sessionId, onHome, onReport }: { sessionId: 
           ) : (
             <span className="pill pill-accent">{MODE_INFO[session.mode].label} mode</span>
           )}
+          {session.rehearsal && <span className="pill pill-muted">Rehearsing slide {session.rehearsal.slide_number}</span>}
           <span className={`status status-${session.status}`}>
             {session.status === "live" ? (paused ? "Paused" : "Live") : session.status === "ready" ? "Ready" : "Ended"}
           </span>
@@ -361,7 +365,7 @@ export default function Presenter({ sessionId, onHome, onReport }: { sessionId: 
           metrics={session.metrics}
           live={live}
           engine={engine}
-          answering={answeringId ? session.questions.find((q) => q.id === answeringId) ?? null : null}
+          answering={answeringId || retrying ? session.questions.find((q) => q.id === (answeringId ?? retrying?.id)) ?? null : null}
           speaking={vad.speaking}
           whisperBusy={whisper.busy}
           onTyped={(text) => {
@@ -377,13 +381,22 @@ export default function Presenter({ sessionId, onHome, onReport }: { sessionId: 
           evaluating={state.evaluating}
           answeringId={answeringId}
           live={live}
-          onAnswer={(id) => setAnsweringId(id)}
+          onAnswer={(id) => { setRetrying(null); setAnsweringId(id); }}
           onDone={(id, typed) => {
             socket.send({ type: "answer_done", question_id: id, typed_answer: typed });
             setAnsweringId(null);
           }}
           onSpeak={speaker.supported ? (text) => speaker.speak(text) : undefined}
           examinerSpeaking={speaker.speaking}
+          retrying={retrying}
+          onRetry={(id, attempt) => { setAnsweringId(null); setRetrying({ id, attempt }); }}
+          onRetryDone={(id, attempt, typed) => {
+            socket.send({ type: "retry_done", question_id: id, attempt, typed_answer: typed });
+            setRetrying(null);
+          }}
+          onRetryCancel={() => setRetrying(null)}
+          intelPending={state.intelPending}
+          comparisons={state.comparisons}
           onSkip={(id) => {
             socket.send({ type: "skip_question", question_id: id });
             if (answeringId === id) setAnsweringId(null);
@@ -393,6 +406,12 @@ export default function Presenter({ sessionId, onHome, onReport }: { sessionId: 
         {session.status === "ready" && (
           <div className="overlay">
             <div className="card start-card">
+              {session.rehearsal && (
+                <div className="info-box small" style={{ marginBottom: 10 }}>
+                  Rehearsal of slide {session.rehearsal.slide_number}: {session.rehearsal.slide_title}. Present this slide again, then end the
+                  presentation to see a before and after comparison.
+                </div>
+              )}
               <h2>Ready when you are</h2>
               <p>
                 <strong>{MODE_INFO[session.mode].label} mode.</strong> Present the way you normally would. Use the arrow keys or the buttons below to

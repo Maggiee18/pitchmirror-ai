@@ -1,6 +1,7 @@
 """Report Generator: deterministic sections + transparent estimated scores + optional LLM narrative."""
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 
@@ -157,7 +158,21 @@ def _rule_recommendations(session, interpretation: list[dict], visual_rows: list
     return recs[:5]
 
 
+async def _safe_intelligence(session) -> dict:
+    from .intelligence_report import build_intelligence
+
+    try:
+        return await asyncio.wait_for(build_intelligence(session), timeout=45)
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:  # the extended sections are optional
+        log.exception("intelligence report failed")
+        return {"error": f"Extended analysis unavailable ({exc.__class__.__name__})."}
+
+
 async def build_report(session) -> dict:
+    # Extended intelligence sections run concurrently and can never break the existing report
+    intel_task = asyncio.create_task(_safe_intelligence(session))
     delivery = compute_delivery(session.segments, session.pauses, session.voiced_s, session.time_on_slide, session.elapsed())
     raw = delivery["raw"]
     interpretation = interpret_delivery(raw)
@@ -243,7 +258,9 @@ async def build_report(session) -> dict:
             log.info("report narrative fell back to rules: %s", exc)
             narrative["error"] = str(exc)
 
+    intelligence = await intel_task
     return {
+        "intelligence": intelligence,
         "session_id": session.id,
         "generated_at": time.time(),
         "provider": llm.public_info(),

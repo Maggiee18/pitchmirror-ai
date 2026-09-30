@@ -1,4 +1,4 @@
-import type { Enrichment, FeedbackItem, LiveMetrics, Question, Segment, ServerEvent, SessionData, SlideAnalysis } from "./types";
+import type { AttemptComparison, Enrichment, FeedbackItem, LiveMetrics, Question, Segment, ServerEvent, SessionData, SlideAnalysis } from "./types";
 
 export interface Notice {
   id: number;
@@ -14,10 +14,13 @@ export interface LiveState {
   notices: Notice[];
   fatal: string | null;
   reportReady: boolean;
+  intelPending: string[]; // question ids with an answer analysis in progress
+  comparisons: Record<string, AttemptComparison | null>;
 }
 
 export const initialLive: LiveState = {
   session: null, analyzing: [], questionPending: false, evaluating: [], notices: [], fatal: null, reportReady: false,
+  intelPending: [], comparisons: {},
 };
 
 let noticeId = 0;
@@ -66,6 +69,11 @@ export function reducer(state: LiveState, action: Action): LiveState {
       };
     case "report_ready":
       return { ...state, reportReady: true };
+    case "answer_intel_pending":
+      return {
+        ...state,
+        intelPending: e.active ? [...new Set([...state.intelPending, e.question_id])] : state.intelPending.filter((id) => id !== e.question_id),
+      };
   }
   if (!s) return state;
   switch (e.type) {
@@ -76,6 +84,15 @@ export function reducer(state: LiveState, action: Action): LiveState {
       return { ...state, session: { ...s, feedback: upsert<FeedbackItem>(s.feedback, e.item) } };
     case "question":
       return { ...state, session: { ...s, questions: upsert<Question>(s.questions, e.item) } };
+    case "answer_intel": {
+      // merge only the attempts, so a concurrent evaluation update is never overwritten
+      const merged = s.questions.map((q) => (q.id === e.question_id ? { ...q, attempts: e.item.attempts } : q));
+      return {
+        ...state,
+        comparisons: e.comparison ? { ...state.comparisons, [e.question_id]: e.comparison } : state.comparisons,
+        session: { ...s, questions: merged.some((q) => q.id === e.question_id) ? merged : [...merged, e.item] },
+      };
+    }
     case "question_update":
       return {
         ...state,
