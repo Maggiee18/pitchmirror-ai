@@ -4,7 +4,7 @@
 
 [![CI](https://github.com/Maggiee18/pitchmirror-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/Maggiee18/pitchmirror-ai/actions/workflows/ci.yml)
 
-**Live demo:** LIVE_DEMO_URL (open in Chrome or Edge and allow the microphone)
+**Live demo:** https://pitchmirror-bmug.onrender.com (open in Chrome or Edge and allow the microphone; it runs on a free server, so the first load can take about a minute)
 
 PitchMirror is a real time coach for presentations, vivas, interviews and pitches. It looks at the slide you are on and listens to what you say at the same time. When the two don't match, it tells you. It spots charts, tables and diagrams you never explained, watches your eye contact through the webcam (on your own device), measures your delivery, and then behaves like a real examiner or investor: it asks a question grounded in your slide and your words, reads it aloud, scores your spoken answer and follows up on what you actually said.
 
