@@ -2,6 +2,8 @@
 
 **Present. Get understood. Get better.**
 
+**Hackathon track:** Real-Time Voice & Multimodal Agents. PitchMirror is a real time multimodal agent that combines voice (live transcription, spoken questions, spoken answers), images (slide and chart understanding) and video (on device eye contact) in one natural conversation.
+
 [![CI](https://github.com/Maggiee18/pitchmirror-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/Maggiee18/pitchmirror-ai/actions/workflows/ci.yml)
 
 **Live demo:** https://pitchmirror-bmug.onrender.com (open in Chrome or Edge and allow the microphone; it runs on a free server, so the first load can take about a minute)
